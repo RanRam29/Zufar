@@ -1,3 +1,4 @@
+
 # Casualty Management App – MVP
 
 This is a full-stack minimal viable product you can run locally.
@@ -53,3 +54,7 @@ X-API-Key: devkey
 ## Notes
 - This is an MVP. It’s production-aware but intentionally lean.
 - Extend with auth (JWT), roles, and background jobs as needed.
+=======
+# Zufar
+ZufaRav
+
