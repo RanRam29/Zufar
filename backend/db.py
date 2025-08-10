@@ -1,4 +1,3 @@
-# backend/db.py
 import os
 from sqlmodel import SQLModel, create_engine, Session
 

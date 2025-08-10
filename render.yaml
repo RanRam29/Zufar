@@ -4,13 +4,11 @@ services:
     env: python
     plan: free
     region: oregon
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python -m uvicorn backend.app:app --host 0.0.0.0 --port $PORT"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn backend.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /docs
+    autoDeploy: true
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
-      # Optional: point to Postgres later; for now SQLite is fine but ephemeral.
-      # - key: DATABASE_URL
-      #   value: "postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME"
-    healthCheckPath: "/docs"
-    autoDeploy: true
+      # later: add DATABASE_URL when you attach Postgres
