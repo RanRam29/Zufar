@@ -1,15 +1,17 @@
 from __future__ import annotations
 from typing import List, Dict
 from pathlib import Path
+from datetime import datetime
+import logging
+
 from fastapi import FastAPI, HTTPException, Depends, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from sqlmodel import select, Session
-from datetime import datetime
-import logging
 
-from .db import init_db, get_session
+from .db import init_db, get_session, engine
 from .models import Event, Participant
 from .schemas import EventCreate, EventSummary, EventDetail, JoinEvent, UpdateRequired
 from .ws import manager
@@ -48,6 +50,23 @@ app.add_middleware(
 def on_startup() -> None:
     init_db()
     log.info("DB initialized. Serving frontend from %s", FRONTEND_DIR)
+
+# --------------------------------------------------
+# Health
+# --------------------------------------------------
+@app.get("/healthz")
+def healthz():
+    """
+    Liveness/readiness probe.
+    Returns 200 and {"status":"ok","db":"up"} when DB is reachable.
+    Returns 200 and {"status":"degraded","db":"down"} if DB check fails.
+    """
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "ok", "db": "up"}
+    except Exception:
+        return {"status": "degraded", "db": "down"}
 
 # --------------------------------------------------
 # Routes
@@ -141,9 +160,17 @@ async def join_event(payload: JoinEvent, session: Session = Depends(get_session)
 
     await manager.broadcast({
         "type": "event_update",
-        "data": {"id": e.id, "status": e.status, "people_count": len(e.participants), "people_required": e.people_required}
+        "data": {
+            "id": e.id,
+            "status": e.status,
+            "people_count": len(e.participants),
+            "people_required": e.people_required
+        }
     })
-    log.info("User %s joined event %s -> %d/%d", payload.username, e.id, len(e.participants), e.people_required)
+    log.info(
+        "User %s joined event %s -> %d/%d",
+        payload.username, e.id, len(e.participants), e.people_required
+    )
     return {"msg": f"{payload.username} joined event {e.id}"}
 
 @app.patch("/events/required")
@@ -159,7 +186,12 @@ async def update_required(payload: UpdateRequired, session: Session = Depends(ge
 
     await manager.broadcast({
         "type": "event_update",
-        "data": {"id": e.id, "status": e.status, "people_required": e.people_required, "people_count": len(e.participants)}
+        "data": {
+            "id": e.id,
+            "status": e.status,
+            "people_required": e.people_required,
+            "people_count": len(e.participants)
+        }
     })
     log.info("Updated required for event %s -> %d", e.id, e.people_required)
     return {"msg": "required updated"}
@@ -185,8 +217,7 @@ async def ws_events(ws: WebSocket):
     log.info("WS connected (%d clients)", len(manager._clients))
     try:
         while True:
-            # Echo any text to keep connection alive and for debugging
-            msg = await ws.receive_text()
+            msg = await ws.receive_text()  # keepalive / echo for debugging
             await ws.send_json({"type": "echo", "data": msg})
     except Exception:
         manager.disconnect(ws)
