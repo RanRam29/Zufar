@@ -1,405 +1,166 @@
-from __future__ import annotations
 
+from __future__ import annotations
 from typing import List, Dict
 from pathlib import Path
-import json
-import logging
-import time
-
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, status, Request
+import logging, time, json, httpx
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, status, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
 from sqlmodel import select, Session
-
 from .db import init_db, get_session, engine
-from .models import Event, Participant
-from .schemas import (
-    EventCreate,
-    EventSummary,
-    EventDetail,
-    JoinEvent,
-    UpdateRequired,
-    # Auth schemas (must exist in backend/schemas.py)
-    UserCreate,
-    UserOut,
-    Token,
-)
+from .models import Event, Participant, User
+from .schemas import (UserCreate, UserRead, Token, EventCreate, EventSummary, EventDetail, JoinEvent, UpdateRequired, EventUpdate)
+from .auth import (register_user, authenticate_user, create_access_token, get_current_user)
 from .ws import manager
 
-# Auth helpers (must exist in backend/auth.py)
-# - register_user(session, payload: UserCreate) -> User
-# - authenticate_user(session, username: str, password: str) -> User | None
-# - create_access_token(sub: str) -> str
-# - get_current_user: FastAPI dependency returning the current user or 401
-from .auth import (
-    register_user,
-    authenticate_user,
-    create_access_token,
-    get_current_user,
-)
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Logging
-# ──────────────────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s :: %(message)s")
 log = logging.getLogger("zufar.app")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# App & Static Files
-# ──────────────────────────────────────────────────────────────────────────────
-app = FastAPI(title="Casualty Management", version="1.1.0")
+app = FastAPI(title="Casualty Management", version="1.2.0")
 
 FRONTEND_DIR = (Path(__file__).resolve().parent.parent / "frontend").resolve()
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="static")
     log.info("Static UI mounted at /static from %s", FRONTEND_DIR)
 else:
-    log.warning("Frontend directory not found: %s (UI disabled; APIs still available)", FRONTEND_DIR)
+    log.warning("Frontend directory not found: %s (UI disabled)", FRONTEND_DIR)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# CORS (relax for MVP; tighten for production)
-# ──────────────────────────────────────────────────────────────────────────────
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Request logging middleware (duration + status)
-# ──────────────────────────────────────────────────────────────────────────────
 @app.middleware("http")
 async def access_log(request: Request, call_next):
     t0 = time.perf_counter()
-    response = None
-    try:
-        response = await call_next(request)
-        return response
-    finally:
-        dt_ms = int((time.perf_counter() - t0) * 1000)
-        if request.url.path != "/healthz":
-            log.info("%s %s -> %s (%d ms)",
-                     request.method, request.url.path, getattr(response, "status_code", "?"), dt_ms)
+    resp = await call_next(request)
+    if request.url.path != "/healthz":
+        log.info("%s %s -> %s (%d ms)", request.method, request.url.path, getattr(resp, "status_code", "?"), int((time.perf_counter()-t0)*1000))
+    return resp
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Global exception handler (don’t leak internals)
-# ──────────────────────────────────────────────────────────────────────────────
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    log.exception("Unhandled error on %s %s", request.method, request.url.path)
-    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+async def on_error(request: Request, exc: Exception):
+    log.exception("Unhandled %s %s", request.method, request.url.path)
+    return JSONResponse(500, {"detail":"Internal server error"})
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Startup
-# ──────────────────────────────────────────────────────────────────────────────
 @app.on_event("startup")
-def on_startup() -> None:
-    try:
-        init_db()
-        log.info("Startup: DB initialized")
-    except Exception:
-        # Keep process up; /healthz surfaces DB state.
-        log.exception("Startup failed during init_db()")
+def on_startup():
+    init_db(); log.info("Startup: DB initialized")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Healthz (Render health check)
-# ──────────────────────────────────────────────────────────────────────────────
 @app.get("/healthz", status_code=status.HTTP_200_OK)
 def healthz():
-    """
-    Liveness/readiness probe.
-    Always 200 to avoid flapping; payload indicates DB state.
-    """
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        return {"status": "ok", "db": "up"}
+        return {"status":"ok","db":"up"}
     except Exception:
-        log.exception("Healthz DB check failed")
-        return {"status": "degraded", "db": "down"}
+        log.exception("Healthz failure"); return {"status":"degraded","db":"down"}
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Root -> redirect to static UI (if present)
-# ──────────────────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
-def root_page() -> str:
-    return """
-    <!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>Casualty Management</title>
-        <meta http-equiv="refresh" content="0; url=/static/">
-      </head>
-      <body>Loading UI…</body>
-    </html>
-    """
+def root_page():
+    return '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=/static/">'
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Auth APIs
-# ──────────────────────────────────────────────────────────────────────────────
-@app.post("/auth/register", response_model=UserOut, tags=["auth"])
-def register(payload: UserCreate, session: Session = Depends(get_session)) -> UserOut:
-    try:
-        user = register_user(session, payload)
-        log.info("POST /auth/register -> user=%s", user.username)
-        return UserOut.model_validate(user)
-    except HTTPException:
-        # register_user should raise 400 if username/email exists
-        log.info("POST /auth/register -> 4xx")
-        raise
-    except Exception:
-        log.exception("POST /auth/register failed")
-        raise HTTPException(500, "Failed to register user")
+@app.post("/auth/register", response_model=UserRead, tags=["auth"])
+def register(payload: UserCreate, session: Session = Depends(get_session)) -> UserRead:
+    u = register_user(session, payload); log.info("register %s", u.username); return UserRead.model_validate(u)
 
 @app.post("/auth/login", response_model=Token, tags=["auth"])
 def login(form: OAuth2PasswordRequestForm = Depends(), session: Session = Depends(get_session)) -> Token:
-    try:
-        user = authenticate_user(session, form.username, form.password)
-        if not user:
-            log.info("POST /auth/login -> 401 username=%s", form.username)
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-        token = create_access_token(sub=str(user.id))
-        log.info("POST /auth/login -> ok username=%s", form.username)
-        return Token(access_token=token, token_type="bearer")
-    except HTTPException:
-        raise
-    except Exception:
-        log.exception("POST /auth/login failed")
-        raise HTTPException(500, "Login failed")
+    u = authenticate_user(session, form.username, form.password)
+    if not u: raise HTTPException(401, "Invalid credentials")
+    return Token(access_token=create_access_token(str(u.id)))
 
-@app.get("/auth/me", response_model=UserOut, tags=["auth"])
-def me(current_user=Depends(get_current_user)) -> UserOut:
-    log.info("GET /auth/me -> user=%s", getattr(current_user, "username", "?"))
-    return UserOut.model_validate(current_user)
+@app.get("/auth/me", response_model=UserRead, tags=["auth"])
+def me(current_user: User = Depends(get_current_user)) -> UserRead:
+    return UserRead.model_validate(current_user)
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Event APIs
-# ──────────────────────────────────────────────────────────────────────────────
 @app.get("/events", response_model=List[EventSummary])
 def list_events(session: Session = Depends(get_session)) -> List[EventSummary]:
-    try:
-        rows = session.exec(select(Event)).all()
-        out = [
-            EventSummary(
-                id=e.id,
-                title=e.title,
-                severity=e.severity,
-                event_time=e.event_time,
-                status=e.status,
-                people_required=e.people_required,
-                people_count=len(e.participants),
-                casualties_count=e.casualties_count,
-            )
-            for e in rows
-        ]
-        log.info("GET /events -> %d items", len(out))
-        return out
-    except Exception:
-        log.exception("GET /events failed")
-        raise HTTPException(500, "Failed to list events")
+    rows = session.exec(select(Event)).all()
+    return [EventSummary(id=e.id,title=e.title,severity=e.severity,event_time=e.event_time,status=e.status,
+            people_required=e.people_required,people_count=len(e.participants),casualties_count=e.casualties_count,lat=e.lat,lng=e.lng) for e in rows]
+
+@app.get("/events/history", response_model=List[EventSummary])
+def list_history(limit: int = Query(100, ge=1, le=1000), session: Session = Depends(get_session)) -> List[EventSummary]:
+    rows = session.exec(select(Event).where(Event.status=="closed").order_by(Event.event_time.desc())).all()[:limit]
+    return [EventSummary(id=e.id,title=e.title,severity=e.severity,event_time=e.event_time,status=e.status,
+            people_required=e.people_required,people_count=len(e.participants),casualties_count=e.casualties_count,lat=e.lat,lng=e.lng) for e in rows]
 
 @app.get("/events/{event_id}", response_model=EventDetail)
 def get_event(event_id: int, session: Session = Depends(get_session)) -> EventDetail:
-    try:
-        e = session.get(Event, event_id)
-        if not e:
-            log.info("GET /events/%s -> 404", event_id)
-            raise HTTPException(404, "Event not found")
-        detail = EventDetail(
-            id=e.id,
-            title=e.title,
-            severity=e.severity,
-            event_time=e.event_time,
-            status=e.status,
-            people_required=e.people_required,
-            people_count=len(e.participants),
-            casualties_count=e.casualties_count,
-            description=e.description,
-            reporter=e.reporter,
-            lat=e.lat,
-            lng=e.lng,
-            created_at=e.created_at,
-        )
-        return detail
-    except HTTPException:
-        raise
-    except Exception:
-        log.exception("GET /events/%s failed", event_id)
-        raise HTTPException(500, "Failed to retrieve event")
+    e = session.get(Event, event_id)
+    if not e: raise HTTPException(404, "Event not found")
+    return EventDetail(id=e.id,title=e.title,severity=e.severity,event_time=e.event_time,status=e.status,
+        people_required=e.people_required,people_count=len(e.participants),casualties_count=e.casualties_count,
+        description=e.description,reporter=e.reporter,lat=e.lat,lng=e.lng,created_at=e.created_at)
 
 @app.post("/events", response_model=EventDetail)
 async def create_event(payload: EventCreate, session: Session = Depends(get_session)) -> EventDetail:
-    try:
-        e = Event(**payload.model_dump())
-        session.add(e)
-        session.commit()
-        session.refresh(e)
-        log.info("POST /events created id=%s title=%s", e.id, e.title)
-    except Exception:
-        session.rollback()
-        log.exception("POST /events insert failed")
-        raise HTTPException(500, "Failed to create event")
-
-    # Broadcast outside transaction; don’t fail API if WS has issues
-    try:
-        await manager.broadcast({"type": "new_event", "data": {"id": e.id, "title": e.title}})
-    except Exception:
-        log.exception("Broadcast new_event failed id=%s", e.id)
-
-    # Return canonical detail
-    return EventDetail(
-        id=e.id,
-        title=e.title,
-        severity=e.severity,
-        event_time=e.event_time,
-        status=e.status,
-        people_required=e.people_required,
-        people_count=len(e.participants),
-        casualties_count=e.casualties_count,
-        description=e.description,
-        reporter=e.reporter,
-        lat=e.lat,
-        lng=e.lng,
-        created_at=e.created_at,
-    )
+    e = Event(**payload.model_dump()); session.add(e); session.commit(); session.refresh(e)
+    try: await manager.broadcast({"type":"new_event","data":{"id":e.id,"title":e.title}})
+    except Exception: pass
+    return get_event(e.id, session)
 
 @app.post("/events/join")
 async def join_event(payload: JoinEvent, session: Session = Depends(get_session)) -> Dict[str, str]:
-    try:
-        e = session.get(Event, payload.event_id)
-        if not e:
-            log.info("POST /events/join -> 404 event_id=%s", payload.event_id)
-            raise HTTPException(404, "Event not found")
-        if e.status == "closed":
-            raise HTTPException(400, "Event is closed")
-        if any(p.username == payload.username for p in e.participants):
-            raise HTTPException(400, "User already joined")
-
-        p = Participant(username=payload.username, event_id=e.id)
-        session.add(p)
-        session.commit()
-        session.refresh(e)
-
-        if len(e.participants) >= e.people_required and e.status != "closed":
-            e.status = "closed"
-            session.add(e)
-            session.commit()
-
-        log.info(
-            "JOIN event=%s by user=%s -> %d/%d status=%s",
-            e.id, payload.username, len(e.participants), e.people_required, e.status
-        )
-    except HTTPException:
-        raise
-    except Exception:
-        session.rollback()
-        log.exception("POST /events/join failed event_id=%s", payload.event_id)
-        raise HTTPException(500, "Failed to join event")
-
-    try:
-        await manager.broadcast({
-            "type": "event_update",
-            "data": {
-                "id": e.id,
-                "status": e.status,
-                "people_count": len(e.participants),
-                "people_required": e.people_required,
-            },
-        })
-    except Exception:
-        log.exception("Broadcast event_update failed event_id=%s", e.id)
-
+    e = session.get(Event, payload.event_id)
+    if not e: raise HTTPException(404, "Event not found")
+    if e.status == "closed": raise HTTPException(400, "Event is closed")
+    if any(p.username==payload.username for p in e.participants): raise HTTPException(400, "User already joined")
+    session.add(Participant(username=payload.username, event_id=e.id)); session.commit(); session.refresh(e)
+    if len(e.participants) >= e.people_required and e.status != "closed": e.status="closed"; session.add(e); session.commit()
+    try: await manager.broadcast({"type":"arrival","data":{"event_id":e.id,"username":payload.username,"people_count":len(e.participants),"people_required":e.people_required,"status":e.status}})
+    except Exception: pass
     return {"msg": f"{payload.username} joined event {e.id}"}
 
 @app.patch("/events/required")
 async def update_required(payload: UpdateRequired, session: Session = Depends(get_session)) -> Dict[str, str]:
-    try:
-        e = session.get(Event, payload.event_id)
-        if not e:
-            raise HTTPException(404, "Event not found")
-        e.people_required = payload.new_required
-        if len(e.participants) < e.people_required:
-            e.status = "active"
-        session.add(e)
-        session.commit()
-        log.info("PATCH /events/required -> event=%s required=%d status=%s",
-                 e.id, e.people_required, e.status)
-    except HTTPException:
-        raise
-    except Exception:
-        session.rollback()
-        log.exception("PATCH /events/required failed event_id=%s", payload.event_id)
-        raise HTTPException(500, "Failed to update requirement")
-
-    try:
-        await manager.broadcast({
-            "type": "event_update",
-            "data": {
-                "id": e.id,
-                "status": e.status,
-                "people_required": e.people_required,
-                "people_count": len(e.participants),
-            },
-        })
-    except Exception:
-        log.exception("Broadcast event_update failed event_id=%s", e.id)
-
+    e = session.get(Event, payload.event_id)
+    if not e: raise HTTPException(404, "Event not found")
+    e.people_required = payload.new_required
+    if len(e.participants) < e.people_required: e.status="active"
+    session.add(e); session.commit()
+    try: await manager.broadcast({"type":"event_update","data":{"id":e.id,"status":e.status,"people_required":e.people_required,"people_count":len(e.participants)}})
+    except Exception: pass
     return {"msg": "required updated"}
+
+@app.patch("/events/{event_id}/edit", response_model=EventDetail)
+def edit_event(event_id: int, payload: EventUpdate, session: Session = Depends(get_session)) -> EventDetail:
+    e = session.get(Event, event_id)
+    if not e: raise HTTPException(404, "Event not found")
+    data = payload.model_dump(exclude_unset=True)
+    for k,v in data.items(): setattr(e, k, v)
+    session.add(e); session.commit(); session.refresh(e)
+    return get_event(e.id, session)
+
+@app.get("/events/geocode")
+def geocode(address: str = Query(..., min_length=3)) -> Dict[str, float]:
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {"q": f"{address}, Israel", "format":"json", "limit":1}
+    with httpx.Client(timeout=10, headers={"User-Agent":"ZufarApp/1.0"}) as client:
+        r = client.get(url, params=params); r.raise_for_status()
+        arr = r.json()
+        if not arr: raise HTTPException(404, "Address not found")
+        return {"lat": float(arr[0]["lat"]), "lng": float(arr[0]["lon"])}
 
 @app.get("/reports/summary")
 def report_summary(session: Session = Depends(get_session)) -> dict:
-    try:
-        events = session.exec(select(Event)).all()
-        severity_counts: dict[str, int] = {}
-        total_participations = 0
-        for e in events:
-            severity_counts[e.severity] = severity_counts.get(e.severity, 0) + 1
-            total_participations += len(e.participants)
-        payload = {
-            "severity_summary": [{"severity": k, "count": v} for k, v in severity_counts.items()],
-            "total_participations": total_participations,
-        }
-        log.info("GET /reports/summary -> %s", payload)
-        return payload
-    except Exception:
-        log.exception("GET /reports/summary failed")
-        raise HTTPException(500, "Failed to build report")
+    rows = session.exec(select(Event)).all()
+    sev, total = {}, 0
+    for e in rows:
+        sev[e.severity] = sev.get(e.severity, 0) + 1
+        total += len(e.participants)
+    return {"severity_summary":[{"severity":k,"count":v} for k,v in sev.items()],"total_participations":total}
 
-# ──────────────────────────────────────────────────────────────────────────────
-# WebSocket: /ws/events
-# ──────────────────────────────────────────────────────────────────────────────
 @app.websocket("/ws/events")
 async def ws_events(ws: WebSocket):
     await manager.connect(ws)
-    log.info("WS connected (%d clients)", len(manager._clients))
     try:
         while True:
-            # Read a message; treat any non-JSON as ping and echo back
             try:
                 raw = await ws.receive_text()
+                await ws.send_json({"type":"echo","data":raw})
             except Exception:
                 break
-
-            try:
-                msg = json.loads(raw)
-                # Future: handle typed messages here (e.g., position updates)
-                await ws.send_json({"type": "ack", "data": msg.get("type", "unknown")})
-            except Exception:
-                try:
-                    await ws.send_json({"type": "echo", "data": raw})
-                except Exception:
-                    log.warning("WS echo failed")
-    except Exception:
-        log.exception("WS loop crashed")
     finally:
         manager.disconnect(ws)
-        log.info("WS disconnected (%d clients)", len(manager._clients))

@@ -1,14 +1,15 @@
+
 services:
   - type: web
     name: zufar
     env: python
     plan: free
-    region: oregon
     buildCommand: pip install -r requirements.txt
     startCommand: python -m uvicorn backend.app:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /docs
+    healthCheckPath: /healthz
     autoDeploy: true
     envVars:
-      - key: PYTHONUNBUFFERED
-        value: "1"
-      # later: add DATABASE_URL when you attach Postgres
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true

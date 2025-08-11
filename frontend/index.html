@@ -1,440 +1,70 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Casualty Management</title>
-  <!-- Leaflet CSS for map -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha512-d1ZvF5y3h4QD/om4KByq87W+p4a17kaI0s5momkGumZ5qX6Ch12HaxDTXiiMHDL/95B2S/bjdXAMVuz/mBw6nw=="
-    crossorigin=""
-  />
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 0;
-      background: #f7f7f7;
-    }
-    header {
-      background: #0f172a;
-      color: white;
-      padding: 1rem;
-      font-size: 1.5rem;
-    }
-    main {
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 1rem;
-    }
-    .card {
-      background: white;
-      border: 1px solid #e5e7eb;
-      border-radius: 0.5rem;
-      padding: 1rem;
-      margin-bottom: 1rem;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    }
-    label {
-      display: block;
-      margin-top: 0.5rem;
-      font-weight: bold;
-    }
-    input, select {
-      width: 100%;
-      padding: 0.5rem;
-      margin-top: 0.25rem;
-      border: 1px solid #d1d5db;
-      border-radius: 0.25rem;
-      box-sizing: border-box;
-    }
-    button {
-      margin-top: 0.75rem;
-      padding: 0.5rem 1rem;
-      background: #2563eb;
-      color: white;
-      border: none;
-      border-radius: 0.25rem;
-      cursor: pointer;
-    }
-    button:disabled {
-      background: #9ca3af;
-      cursor: not-allowed;
-    }
-    #eventsList .event-item {
-      border-top: 1px solid #f3f4f6;
-      padding: 0.5rem 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    #eventsList .event-item:first-child {
-      border-top: none;
-    }
-    #toast {
-      position: fixed;
-      bottom: 1rem;
-      right: 1rem;
-      background: rgba(17, 24, 39, 0.9);
-      color: white;
-      padding: 1rem;
-      border-radius: 0.5rem;
-      min-width: 200px;
-      display: none;
-    }
-    #map {
-      height: 400px;
-      width: 100%;
-      margin-top: 1rem;
-      border: 1px solid #e5e7eb;
-      border-radius: 0.5rem;
-    }
-  </style>
-</head>
+<!doctype html>
+<html lang="he"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Zufar – ניהול אירועים</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<style>
+body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+header { background:#0b3d91;color:#fff;padding:10px;text-align:center; }
+nav button { margin:5px; padding:5px 10px; }
+#map{ height: 400px; } .hidden{display:none;}
+.event-card{border:1px solid #ccc;padding:8px;margin:5px;border-radius:4px;}
+.form-group{margin-bottom:10px;} label{display:block;margin-bottom:4px;} input,textarea,select{width:100%;padding:6px;}
+</style></head>
 <body>
-  <header>Casualty Management</header>
-  <main>
-    <!-- Toast notifications -->
-    <div id="toast"></div>
-    <!-- Authentication forms -->
-    <div id="authSection" class="card">
-      <h2>Login or Register</h2>
-      <form id="registerForm">
-        <h3>Register</h3>
-        <label>Username</label>
-        <input type="text" name="username" required />
-        <label>Email</label>
-        <input type="email" name="email" required />
-        <label>Password</label>
-        <input type="password" name="password" required minlength="6" />
-        <label>Role</label>
-        <select name="role">
-          <option value="responder">Responder</option>
-          <option value="dispatcher">Dispatcher</option>
-        </select>
-        <button type="submit">Register</button>
-      </form>
-      <hr />
-      <form id="loginForm">
-        <h3>Login</h3>
-        <label>Username</label>
-        <input type="text" name="username" required />
-        <label>Password</label>
-        <input type="password" name="password" required />
-        <button type="submit">Login</button>
-      </form>
+<header><h1>📍 Zufar – ניהול אירועים</h1></header>
+<nav>
+  <button onclick="showTab('map-tab')">מפה</button>
+  <button onclick="showTab('auth-tab')">התחברות / הרשמה</button>
+  <button onclick="showTab('history-tab')">אירועים היסטוריים</button>
+</nav>
+<section id="map-tab">
+  <div id="map"></div>
+  <h2>אירועים פעילים</h2>
+  <div id="events-list"></div>
+  <h3>צור אירוע חדש</h3>
+  <div id="create-event-form">
+    <div class="form-group"><label>כותרת</label><input id="title" type="text"/></div>
+    <div class="form-group"><label>חומרה</label>
+      <select id="severity"><option value="low">נמוכה</option><option value="medium">בינונית</option><option value="high">גבוהה</option></select>
     </div>
-
-    <!-- Main application section (hidden until authenticated) -->
-    <div id="appSection" style="display: none;">
-      <div class="card">
-        <h2>Create Event</h2>
-        <form id="eventForm">
-          <label>Title</label>
-          <input name="title" required />
-          <label>Description</label>
-          <input name="description" required />
-          <label>Severity</label>
-          <select name="severity">
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-          <label>Latitude</label>
-          <input name="lat" type="number" step="any" required />
-          <label>Longitude</label>
-          <input name="lng" type="number" step="any" required />
-          <label>People Required</label>
-          <input name="people_required" type="number" min="1" value="1" />
-          <label>Casualties</label>
-          <input name="casualties_count" type="number" min="0" value="0" />
-          <label>Event Time</label>
-          <input name="event_time" type="datetime-local" required />
-          <button type="submit">Create Event</button>
-        </form>
-      </div>
-      <div class="card">
-        <h2>Events</h2>
-        <button id="refreshBtn">Refresh</button>
-        <div id="eventsList"></div>
-      </div>
-      <div class="card">
-        <h2>Map</h2>
-        <div id="map"></div>
-      </div>
-    </div>
-  </main>
-  <!-- Leaflet JS for map -->
-  <script
-    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha512-nmmcXD/6zq4+3JJmgYeSx9VIUpBAkLTlaX2UjsFvdcTtgEcL50DJBSSTXobHxPPH/F+NcwHfRQ8Z8WT+aSOaDQ=="
-    crossorigin=""
-  ></script>
-  <script>
-    const API_BASE = window.location.origin;
-    let authToken = null;
-    let currentUser = null;
-    let ws = null;
-    let map = null;
-    const eventMarkers = new Map();
-    const userMarkers = new Map();
-
-    function showToast(message) {
-      const toast = document.getElementById('toast');
-      toast.textContent = message;
-      toast.style.display = 'block';
-      setTimeout(() => {
-        toast.style.display = 'none';
-      }, 4000);
-    }
-
-    // Registration
-    document.getElementById('registerForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const formData = new FormData(e.target);
-      const payload = Object.fromEntries(formData.entries());
-      try {
-        const res = await fetch(API_BASE + '/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          showToast('Register failed: ' + err.detail);
-        } else {
-          showToast('Registration successful');
-          e.target.reset();
-        }
-      } catch (err) {
-        showToast('Registration error');
-      }
-    });
-
-    // Login
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const formData = new FormData(e.target);
-      try {
-        const res = await fetch(API_BASE + '/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams(formData),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          showToast('Login failed: ' + (data.detail || res.statusText));
-        } else {
-          authToken = data.access_token;
-          localStorage.setItem('token', authToken);
-          await fetchCurrentUser();
-          initApp();
-        }
-      } catch (err) {
-        showToast('Login error');
-      }
-    });
-
-    async function fetchCurrentUser() {
-      const res = await fetch(API_BASE + '/auth/me', {
-        headers: { Authorization: 'Bearer ' + authToken },
-      });
-      if (res.ok) {
-        currentUser = await res.json();
-      } else {
-        currentUser = null;
-      }
-    }
-
-    function initWebSocket() {
-      if (ws) {
-        ws.close();
-      }
-      ws = new WebSocket(`${API_BASE.replace('http', 'ws')}/ws/events?token=${authToken}`);
-      ws.onopen = () => {
-        console.log('WS connected');
-        // Send heartbeat pings
-        setInterval(() => {
-          try {
-            ws.send(JSON.stringify({ type: 'ping' }));
-          } catch {}
-        }, 25000);
-      };
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === 'new_event') {
-            showToast('New event: ' + msg.data.title);
-            loadEvents();
-          } else if (msg.type === 'event_update') {
-            showToast('Event updated');
-            loadEvents();
-          } else if (msg.type === 'position_update') {
-            const { user_id, lat, lng } = msg.data;
-            upsertUserMarker(user_id, lat, lng);
-          }
-        } catch {}
-      };
-      ws.onclose = () => {
-        console.log('WS closed');
-      };
-    }
-
-    function initMap() {
-      map = L.map('map').setView([32.08, 34.78], 12);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors',
-      }).addTo(map);
-    }
-
-    function upsertEventMarker(event) {
-      let marker = eventMarkers.get(event.id);
-      if (!marker) {
-        marker = L.marker([event.lat, event.lng]);
-        marker.addTo(map);
-        marker.bindPopup(`<strong>${event.title}</strong><br>${event.description}`);
-        eventMarkers.set(event.id, marker);
-      } else {
-        marker.setLatLng([event.lat, event.lng]);
-      }
-    }
-
-    function upsertUserMarker(userId, lat, lng) {
-      let marker = userMarkers.get(userId);
-      if (!marker) {
-          marker = L.circleMarker([lat, lng], { radius: 6, color: '#10b981' }).addTo(map);
-          marker.bindPopup('User ' + userId);
-          userMarkers.set(userId, marker);
-      } else {
-          marker.setLatLng([lat, lng]);
-      }
-    }
-
-    async function loadEvents() {
-      const listEl = document.getElementById('eventsList');
-      listEl.innerHTML = '<div>Loading…</div>';
-      try {
-        const res = await fetch(API_BASE + '/events');
-        const events = await res.json();
-        listEl.innerHTML = '';
-        events.forEach((ev) => {
-          const item = document.createElement('div');
-          item.className = 'event-item';
-          item.innerHTML = `<div><strong>${ev.title}</strong><br><small>${new Date(ev.event_time).toLocaleString()}</small><br>${ev.people_count}/${ev.people_required} responders, casualties: ${ev.casualties_count}</div>`;
-          const joinBtn = document.createElement('button');
-          joinBtn.textContent = 'Join';
-          joinBtn.onclick = async () => {
-            try {
-              const resp = await fetch(API_BASE + '/events/join', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
-                body: JSON.stringify({ event_id: ev.id, username: currentUser.username }),
-              });
-              const result = await resp.json();
-              if (!resp.ok) {
-                showToast('Join failed: ' + result.detail);
-              } else {
-                showToast('Joined event');
-                loadEvents();
-              }
-            } catch (err) {
-              showToast('Join error');
-            }
-          };
-          item.appendChild(joinBtn);
-          listEl.appendChild(item);
-          // create event marker
-        });
-        // fetch detailed events to update markers
-        events.forEach(async (ev) => {
-          try {
-            const detail = await (await fetch(API_BASE + `/events/${ev.id}`)).json();
-            upsertEventMarker(detail);
-          } catch {}
-        });
-      } catch (err) {
-        listEl.innerHTML = '<div>Error loading events</div>';
-      }
-    }
-
-    // Create event
-    document.getElementById('eventForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const formData = new FormData(e.target);
-      const payload = Object.fromEntries(formData.entries());
-      // Convert numeric fields
-      payload.lat = parseFloat(payload.lat);
-      payload.lng = parseFloat(payload.lng);
-      payload.people_required = parseInt(payload.people_required);
-      payload.casualties_count = parseInt(payload.casualties_count);
-      payload.event_time = new Date(payload.event_time).toISOString();
-      try {
-        const res = await fetch(API_BASE + '/events', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + authToken },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const err = await res.json();
-          showToast('Create failed: ' + err.detail);
-        } else {
-          showToast('Event created');
-          e.target.reset();
-          loadEvents();
-        }
-      } catch (err) {
-        showToast('Error creating event');
-      }
-    });
-
-    document.getElementById('refreshBtn').addEventListener('click', loadEvents);
-
-    function initLocationTracking() {
-      if (!('geolocation' in navigator)) {
-        console.warn('Geolocation not available');
-        return;
-      }
-      navigator.geolocation.watchPosition(
-        (pos) => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              JSON.stringify({
-                type: 'position',
-                lat: pos.coords.latitude,
-                lng: pos.coords.longitude,
-              })
-            );
-          }
-        },
-        (err) => {
-          console.warn('Geolocation error', err);
-        },
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
-      );
-    }
-
-    async function initApp() {
-      document.getElementById('authSection').style.display = 'none';
-      document.getElementById('appSection').style.display = 'block';
-      initMap();
-      initWebSocket();
-      initLocationTracking();
-      loadEvents();
-    }
-
-    // Attempt auto-login if token saved
-    (async () => {
-      const savedToken = localStorage.getItem('token');
-      if (savedToken) {
-        authToken = savedToken;
-        await fetchCurrentUser();
-        if (currentUser) {
-          initApp();
-        }
-      }
-    })();
-  </script>
-</body>
-</html>
+    <div class="form-group"><label>תיאור</label><textarea id="description"></textarea></div>
+    <div class="form-group"><label>כתובת (בישראל)</label><input id="address" type="text"/> <button onclick="geocodeAddress()">🔍 מצא נקודת ציון</button></div>
+    <div class="form-group"><label>Lat</label><input id="lat" type="number" step="any"/><label>Lng</label><input id="lng" type="number" step="any"/></div>
+    <div class="form-group"><label>מספר אנשים נדרש</label><input id="people_required" type="number" value="5"/></div>
+    <button onclick="createEvent()">צור אירוע</button>
+  </div>
+</section>
+<section id="auth-tab" class="hidden">
+  <h2>הרשמה</h2>
+  <div class="form-group"><label>שם משתמש</label><input id="reg-username" type="text"/></div>
+  <div class="form-group"><label>אימייל</label><input id="reg-email" type="email"/></div>
+  <div class="form-group"><label>סיסמה</label><input id="reg-password" type="password"/></div>
+  <button onclick="register()">הירשם</button>
+  <h2>התחברות</h2>
+  <div class="form-group"><label>שם משתמש</label><input id="login-username" type="text"/></div>
+  <div class="form-group"><label>סיסמה</label><input id="login-password" type="password"/></div>
+  <button onclick="login()">התחבר</button>
+  <div><button onclick="enableNotifications()">הפעל התראות</button></div>
+</section>
+<section id="history-tab" class="hidden">
+  <h2>אירועים היסטוריים</h2><div id="history-list"></div>
+</section>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+const API_BASE = window.location.origin; let map, markers={}, token=null;
+function showTab(id){document.querySelectorAll("section").forEach(s=>s.classList.add("hidden"));document.getElementById(id).classList.remove("hidden");}
+function initMap(){map=L.map('map').setView([31.0461,34.8516],8);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'Map data © OpenStreetMap'}).addTo(map);}
+async function fetchEvents(){const res=await fetch(`${API_BASE}/events`);const data=await res.json();document.getElementById("events-list").innerHTML="";data.forEach(ev=>{const card=document.createElement("div");card.className="event-card";card.innerHTML=`<b>${ev.title}</b> (${ev.severity}) – ${ev.people_count}/${ev.people_required} משתתפים<br><button onclick="joinEvent(${ev.id})">הצטרף</button> <button onclick="editEventPrompt(${ev.id})">ערוך</button>`;document.getElementById("events-list").appendChild(card);if(!markers[ev.id]){markers[ev.id]=L.marker([ev.lat,ev.lng]).addTo(map).bindPopup(ev.title);}else{markers[ev.id].setLatLng([ev.lat,ev.lng]).setPopupContent(ev.title);}})}
+async function fetchHistory(){const r=await fetch(`${API_BASE}/events/history`);const data=await r.json();const c=document.getElementById("history-list");c.innerHTML="";data.forEach(ev=>{const card=document.createElement("div");card.className="event-card";card.innerHTML=`<b>${ev.title}</b> (${ev.severity}) – נסגר`;c.appendChild(card);});}
+async function createEvent(){const payload={title:document.getElementById("title").value,severity:document.getElementById("severity").value,description:document.getElementById("description").value,address:document.getElementById("address").value,lat:parseFloat(document.getElementById("lat").value),lng:parseFloat(document.getElementById("lng").value),people_required:parseInt(document.getElementById("people_required").value)};const res=await fetch(`${API_BASE}/events`,{method:"POST",headers:{"Content-Type":"application/json",...(token?{Authorization:`Bearer ${token}`}:{})},body:JSON.stringify(payload)});if(res.ok){alert("אירוע נוצר");fetchEvents();}else{alert("שגיאה ביצירת האירוע");}}
+async function editEventPrompt(id){const newRequired=prompt("מספר משתתפים נדרש חדש (או השאר ריק):");const newTitle=prompt("כותרת חדשה (או ריק):");const body={};if(newRequired) body.people_required=parseInt(newRequired);if(newTitle) body.title=newTitle;if(!Object.keys(body).length) return;const res=await fetch(`${API_BASE}/events/${id}/edit`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});if(res.ok){fetchEvents();}else{alert("עריכה נכשלה");}}
+async function joinEvent(id){const username=prompt("הכנס שם להצטרפות:");if(!username) return;const res=await fetch(`${API_BASE}/events/join`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({event_id:id,username})});if(res.ok){alert("הצטרפת לאירוע");fetchEvents();}}
+async function geocodeAddress(){const address=document.getElementById("address").value;const res=await fetch(`${API_BASE}/events/geocode?address=${encodeURIComponent(address)}`);if(res.ok){const {lat,lng}=await res.json();document.getElementById("lat").value=lat;document.getElementById("lng").value=lng;map.setView([lat,lng],14);}else{alert("כתובת לא נמצאה");}}
+async function register(){const payload={username:document.getElementById("reg-username").value,email:document.getElementById("reg-email").value,password:document.getElementById("reg-password").value};const res=await fetch(`${API_BASE}/auth/register`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});alert(res.ok?"נרשמת בהצלחה":"שגיאה בהרשמה");}
+async function login(){const form=new URLSearchParams();form.append("username",document.getElementById("login-username").value);form.append("password",document.getElementById("login-password").value);const res=await fetch(`${API_BASE}/auth/login`,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:form});if(res.ok){const data=await res.json();token=data.access_token;alert("התחברת");}else{alert("שגיאת התחברות");}}
+function enableNotifications(){if(Notification.permission==="granted"){alert("התראות כבר מופעלות");}else{Notification.requestPermission().then(p=>{if(p==="granted") alert("התראות הופעלו");});}}
+function connectWS(){const proto=location.protocol==="https:"?"wss":"ws";const ws=new WebSocket(`${proto}://${window.location.host}/ws/events`);ws.onmessage=ev=>{const msg=JSON.parse(ev.data);if(msg.type==="new_event"){fetchEvents();if(Notification.permission==="granted"){new Notification("אירוע חדש",{body:msg.data.title});}}if(msg.type==="arrival"){if(Notification.permission==="granted"){new Notification("משתמש הצטרף",{body:msg.data.username});}}};}
+initMap();fetchEvents();fetchHistory();connectWS();
+</script>
+</body></html>
