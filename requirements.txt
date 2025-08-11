@@ -7,3 +7,4 @@ python-jose[cryptography]>=3.3.0
 requests>=2.32.0
 anyio>=4.0.0
 alembic>=1.13.0
+pydantic[email]>=2.11.0
