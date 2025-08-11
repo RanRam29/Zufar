@@ -6,7 +6,6 @@ from .base import Base
 
 class Event(Base):
     __tablename__ = "event"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(200))
     participants: Mapped[List["Participant"]] = relationship(
@@ -15,7 +14,6 @@ class Event(Base):
 
 class Participant(Base):
     __tablename__ = "participant"
-
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("event.id"), nullable=False, index=True)
     full_name: Mapped[str] = mapped_column(String(200))
