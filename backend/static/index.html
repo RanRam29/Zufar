@@ -1,21 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="he" dir="rtl">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ABIS Control Panel</title>
-    <link rel="stylesheet" href="./assets/app.css" />
+    <title>Service Console</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <link rel="stylesheet" href="/static/assets/app.css" />
   </head>
   <body>
     <header class="header">
-      <div class="brand">ABIS Control Panel</div>
+      <div class="brand">Service Console</div>
       <nav class="nav">
-        <a href="#/dashboard">Dashboard</a>
-        <a href="#/api">API Explorer</a>
-        <a href="#/about">About</a>
+        <a href="#/map">מפה</a>
+        <a href="#/events">אירועים</a>
+        <a href="#/historical">אירועים היסטוריים</a>
+        <a href="#/signup">הרשמה</a>
+        <a href="#/login">התחברות</a>
       </nav>
     </header>
     <main id="app" class="container"></main>
-    <script src="./assets/app.js"></script>
+    <script src="/static/assets/app.js"></script>
   </body>
 </html>

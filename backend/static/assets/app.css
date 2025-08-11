@@ -1,19 +1,14 @@
-:root { --bg:#0b1420; --panel:#111a28; --muted:#8291a7; --accent:#48a2ff; --ok:#2ecc71; --warn:#f1c40f; --err:#e74c3c; }
-*{box-sizing:border-box}
-body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:#e9f0f7}
+body{margin:0;font-family:Segoe UI,Roboto,Arial,sans-serif;background:#0b1420;color:#e9f0f7}
 .header{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#0e1827;border-bottom:1px solid #1f2b3d;position:sticky;top:0;z-index:2}
-.brand{font-weight:700;letter-spacing:.3px}
-.nav a{color:#cfe6ff;text-decoration:none;margin-left:16px;opacity:.9}
-.nav a:hover{opacity:1}
-.container{max-width:1080px;margin:24px auto;padding:0 16px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
-.card{background:var(--panel);border:1px solid #1f2b3d;border-radius:14px;padding:16px;box-shadow:0 6px 18px rgba(0,0,0,.18)}
-.card h3{margin:0 0 6px 0;font-size:16px}
-.muted{color:var(--muted);font-size:12px}
-.kpi{font-size:28px;font-weight:700;margin-top:10px}
-button, .btn{background:var(--accent);border:none;color:#0b1420;padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
-.btn.secondary{background:#203149;color:#cfe6ff}
-pre{background:#0b1420;border:1px solid #1f2b3d;border-radius:12px;padding:12px;overflow:auto}
-.table{width:100%;border-collapse:collapse}
-.table th,.table td{border-bottom:1px solid #223147;padding:10px 8px;text-align:left;font-size:14px}
-.status.up{color:var(--ok)} .status.down{color:var(--err)} .status.warn{color:var(--warn)}
+.brand{font-weight:700}
+.nav a{color:#cfe6ff;text-decoration:none;margin-left:16px}
+.container{max-width:1100px;margin:24px auto;padding:0 16px}
+.card{background:#111a28;border:1px solid #1f2b3d;border-radius:14px;padding:16px;box-shadow:0 6px 18px rgba(0,0,0,.18);margin-bottom:16px}
+label{display:block;margin:8px 0 4px 0}
+input,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #1f2b3d;background:#0b1420;color:#e9f0f7}
+button{margin-top:10px;background:#48a2ff;border:none;color:#0b1420;padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+#map,#attendeesMap{height:520px;border-radius:14px;border:1px solid #1f2b3d}
+table{width:100%;border-collapse:collapse}
+th,td{border-bottom:1px solid #223147;padding:8px;text-align:right}
+.muted{color:#8291a7;font-size:12px}
