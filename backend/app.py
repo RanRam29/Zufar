@@ -16,7 +16,7 @@ app.add_middleware(
 )
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+app.mount("/static", StaticFiles(directory=static_dir, html=True), name="static")
 
 app.include_router(health.router)
 app.include_router(events.router)
@@ -32,3 +32,8 @@ async def on_error(request: Request, exc: Exception):
 @app.get("/api/version")
 def version():
     return {"name": "Backend Service (Fixed)", "version": os.getenv("APP_VERSION", "0.1.0")}
+
+
+@app.head("/", include_in_schema=False)
+def root_head():
+    return RedirectResponse(url="/static/index.html")
