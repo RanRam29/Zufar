@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import List, Dict
 from pathlib import Path
-from datetime import datetime
 import json
 import logging
 import time
@@ -11,27 +10,50 @@ from fastapi import FastAPI, HTTPException, Depends, WebSocket, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
 from sqlmodel import select, Session
 
 from .db import init_db, get_session, engine
 from .models import Event, Participant
-from .schemas import EventCreate, EventSummary, EventDetail, JoinEvent, UpdateRequired
+from .schemas import (
+    EventCreate,
+    EventSummary,
+    EventDetail,
+    JoinEvent,
+    UpdateRequired,
+    # Auth schemas (must exist in backend/schemas.py)
+    UserCreate,
+    UserOut,
+    Token,
+)
 from .ws import manager
 
-# --------------------------------------------------------------------
+# Auth helpers (must exist in backend/auth.py)
+# - register_user(session, payload: UserCreate) -> User
+# - authenticate_user(session, username: str, password: str) -> User | None
+# - create_access_token(sub: str) -> str
+# - get_current_user: FastAPI dependency returning the current user or 401
+from .auth import (
+    register_user,
+    authenticate_user,
+    create_access_token,
+    get_current_user,
+)
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Logging
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
 )
 log = logging.getLogger("zufar.app")
 
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # App & Static Files
-# --------------------------------------------------------------------
-app = FastAPI(title="Casualty Management", version="1.0.0")
+# ──────────────────────────────────────────────────────────────────────────────
+app = FastAPI(title="Casualty Management", version="1.1.0")
 
 FRONTEND_DIR = (Path(__file__).resolve().parent.parent / "frontend").resolve()
 if FRONTEND_DIR.exists():
@@ -40,9 +62,9 @@ if FRONTEND_DIR.exists():
 else:
     log.warning("Frontend directory not found: %s (UI disabled; APIs still available)", FRONTEND_DIR)
 
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # CORS (relax for MVP; tighten for production)
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -50,45 +72,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --------------------------------------------------------------------
-# Minimal request logging middleware (duration + status)
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# Request logging middleware (duration + status)
+# ──────────────────────────────────────────────────────────────────────────────
 @app.middleware("http")
 async def access_log(request: Request, call_next):
     t0 = time.perf_counter()
+    response = None
     try:
         response = await call_next(request)
         return response
     finally:
         dt_ms = int((time.perf_counter() - t0) * 1000)
-        # avoid logging /healthz every second too noisily
         if request.url.path != "/healthz":
             log.info("%s %s -> %s (%d ms)",
                      request.method, request.url.path, getattr(response, "status_code", "?"), dt_ms)
 
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # Global exception handler (don’t leak internals)
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     log.exception("Unhandled error on %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # Startup
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 def on_startup() -> None:
     try:
         init_db()
         log.info("Startup: DB initialized")
     except Exception:
-        # Keep process up; /healthz will expose DB state.
+        # Keep process up; /healthz surfaces DB state.
         log.exception("Startup failed during init_db()")
 
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # Healthz (Render health check)
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 @app.get("/healthz", status_code=status.HTTP_200_OK)
 def healthz():
     """
@@ -103,9 +125,9 @@ def healthz():
         log.exception("Healthz DB check failed")
         return {"status": "degraded", "db": "down"}
 
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # Root -> redirect to static UI (if present)
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 def root_page() -> str:
     return """
@@ -121,9 +143,47 @@ def root_page() -> str:
     </html>
     """
 
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
+# Auth APIs
+# ──────────────────────────────────────────────────────────────────────────────
+@app.post("/auth/register", response_model=UserOut, tags=["auth"])
+def register(payload: UserCreate, session: Session = Depends(get_session)) -> UserOut:
+    try:
+        user = register_user(session, payload)
+        log.info("POST /auth/register -> user=%s", user.username)
+        return UserOut.model_validate(user)
+    except HTTPException:
+        # register_user should raise 400 if username/email exists
+        log.info("POST /auth/register -> 4xx")
+        raise
+    except Exception:
+        log.exception("POST /auth/register failed")
+        raise HTTPException(500, "Failed to register user")
+
+@app.post("/auth/login", response_model=Token, tags=["auth"])
+def login(form: OAuth2PasswordRequestForm = Depends(), session: Session = Depends(get_session)) -> Token:
+    try:
+        user = authenticate_user(session, form.username, form.password)
+        if not user:
+            log.info("POST /auth/login -> 401 username=%s", form.username)
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        token = create_access_token(sub=str(user.id))
+        log.info("POST /auth/login -> ok username=%s", form.username)
+        return Token(access_token=token, token_type="bearer")
+    except HTTPException:
+        raise
+    except Exception:
+        log.exception("POST /auth/login failed")
+        raise HTTPException(500, "Login failed")
+
+@app.get("/auth/me", response_model=UserOut, tags=["auth"])
+def me(current_user=Depends(get_current_user)) -> UserOut:
+    log.info("GET /auth/me -> user=%s", getattr(current_user, "username", "?"))
+    return UserOut.model_validate(current_user)
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Event APIs
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 @app.get("/events", response_model=List[EventSummary])
 def list_events(session: Session = Depends(get_session)) -> List[EventSummary]:
     try:
@@ -314,9 +374,9 @@ def report_summary(session: Session = Depends(get_session)) -> dict:
         log.exception("GET /reports/summary failed")
         raise HTTPException(500, "Failed to build report")
 
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 # WebSocket: /ws/events
-# --------------------------------------------------------------------
+# ──────────────────────────────────────────────────────────────────────────────
 @app.websocket("/ws/events")
 async def ws_events(ws: WebSocket):
     await manager.connect(ws)
