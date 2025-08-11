@@ -1,0 +1,126 @@
+*** a/backend/core/config.py
+--- b/backend/core/config.py
+@@
+-from pydantic import BaseModel
+-import os
+-
+-# Existing simple settings (may differ between branches)
+-DATABASE_URL = os.getenv("DATABASE_URL", "")
+-JWT_SECRET = os.getenv("JWT_SECRET") or os.getenv("Jwt") or ""
+-if DATABASE_URL.startswith("postgres://"):
+-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
++from __future__ import annotations
++
++import logging
++import os
++from pydantic import BaseModel
++
++log = logging.getLogger("settings")
++
++class Settings(BaseModel):
++    DATABASE_URL: str
++    JWT_SECRET: str
++
++    @classmethod
++    def load(cls) -> "Settings":
++        # Read envs
++        db = os.getenv("DATABASE_URL", "")
++        jwt = os.getenv("JWT_SECRET")
++
++        # Backward-compat: allow 'Jwt' once, but warn
++        if not jwt:
++            legacy = os.getenv("Jwt")
++            if legacy:
++                jwt = legacy
++                log.warning("Using legacy env var 'Jwt'. Please rename to 'JWT_SECRET'.")
++
++        if not jwt:
++            raise RuntimeError("JWT secret not set. Define env var 'JWT_SECRET'.")
++
++        # Normalize postgres URI to SQLAlchemy dialect
++        if db.startswith("postgres://"):
++            db = db.replace("postgres://", "postgresql+psycopg://", 1)
++        if db.startswith("postgresql://"):
++            # If driver missing, add +psycopg
++            if not db.startswith("postgresql+psycopg://"):
++                db = db.replace("postgresql://", "postgresql+psycopg://", 1)
++
++        return cls(DATABASE_URL=db, JWT_SECRET=jwt)
++
++settings = Settings.load()
+*** a/backend/core/security.py
+--- b/backend/core/security.py
+@@
+-from datetime import datetime, timedelta, timezone
+-import base64
+-import hmac
+-import json
+-import hashlib
+-from typing import Any, Dict
+-
+-# In-house lightweight JWT (HMAC-SHA256) to avoid external deps
+-# Token header/payload base64url encoded; signature HMAC-SHA256(JWT_SECRET, header.payload)
+-
+-JWT_SECRET = os.getenv("JWT_SECRET") or os.getenv("Jwt") or "dev-secret"
+-
+-def _b64url_encode(b: bytes) -> str:
+-    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
+-
+-def _b64url_decode(s: str) -> bytes:
+-    pad = "=" * (-len(s) % 4)
+-    return base64.urlsafe_b64decode((s + pad).encode("ascii"))
++from datetime import datetime, timedelta, timezone
++import base64
++import hmac
++import json
++import hashlib
++import os
++from typing import Any, Dict
++
++# Settings source of truth
++from .config import settings
++
++# Use the configured secret (with legacy fallback handled in config)
++JWT_SECRET = settings.JWT_SECRET
+@@
+-def create_access_token(subject: str, expires_minutes: int | None = None) -> str:
++def create_access_token(subject: str, expires_minutes: int | None = None) -> str:
+     if expires_minutes is None:
+         expires_minutes = 60 * 24
+     now = datetime.now(tz=timezone.utc)
+     payload: Dict[str, Any] = {
+         "sub": subject,
+         "iat": int(now.timestamp()),
+         "exp": int((now + timedelta(minutes=expires_minutes)).timestamp()),
+     }
+-    header = {"alg": "HS256", "typ": "JWT"}
++    header = {"alg": "HS256", "typ": "JWT"}
+     header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode())
+     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode())
+     signing_input = f"{header_b64}.{payload_b64}".encode()
+     sig = hmac.new(JWT_SECRET.encode(), signing_input, hashlib.sha256).digest()
+     signature_b64 = _b64url_encode(sig)
+     return f"{header_b64}.{payload_b64}.{signature_b64}"
+@@
+-def verify_access_token(token: str) -> Dict[str, Any]:
++def verify_access_token(token: str) -> Dict[str, Any]:
+     try:
+         header_b64, payload_b64, signature_b64 = token.split(".")
+     except ValueError:
+         raise ValueError("Invalid token format")
+     signing_input = f"{header_b64}.{payload_b64}".encode()
+     expected_sig = hmac.new(JWT_SECRET.encode(), signing_input, hashlib.sha256).digest()
+     actual_sig = _b64url_decode(signature_b64)
+     if not hmac.compare_digest(expected_sig, actual_sig):
+         raise ValueError("Invalid token signature")
+     payload = json.loads(_b64url_decode(payload_b64))
+     if "exp" in payload and int(payload["exp"]) < int(datetime.now(tz=timezone.utc).timestamp()):
+         raise ValueError("Token expired")
+     return payload
++
++def _b64url_encode(b: bytes) -> str:
++    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
++
++def _b64url_decode(s: str) -> bytes:
++    pad = "=" * (-len(s) % 4)
++    return base64.urlsafe_b64decode((s + pad).encode("ascii"))
