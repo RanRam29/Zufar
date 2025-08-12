@@ -2,17 +2,16 @@ services:
   - type: web
     name: zufar-backend
     env: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r backend/requirements.txt
     startCommand: ./scripts/start.sh
-    plan: free
     autoDeploy: true
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: LOG_LEVEL
         value: INFO
       - key: ALEMBIC_UPGRADE_TARGET
         value: head
-      - key: PYTHON_VERSION
-        value: 3.11.9
     healthCheckPath: /healthz
 
   - type: web
@@ -20,10 +19,10 @@ services:
     env: static
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
+    autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: 20
-    autoDeploy: true
     routes:
       - type: rewrite
         source: "/*"
