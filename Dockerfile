@@ -24,4 +24,7 @@ COPY . .
 EXPOSE 8000
 
 # Command to run the app
-CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
+ENV PYTHONPATH=/app
+
+# Entrypoint script runs migrations then starts Uvicorn
+CMD ["./scripts/start.sh"]
