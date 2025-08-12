@@ -44,3 +44,16 @@
    ```
    (If more than two, list them all).
 3. Commit the generated merge revision under `alembic/versions/` and redeploy.
+
+---
+## Included merge revision
+- Added `alembic/versions/mrg_20250812_single_head_merge_heads_to_single.py` which merges heads `a1b2c3d4fullnam3` and `e3bffa2a4321` into a single lineage (no schema changes). Safe for existing DBs.
+- After adding this file to your repo, run:
+  ```bash
+  alembic upgrade mrg_20250812_single_head
+  alembic upgrade head
+  ```
+
+## Runtime target override
+- `scripts/start.sh` now uses `ALEMBIC_UPGRADE_TARGET` (default: `heads`).
+  - To force standard flow after the merge, set `ALEMBIC_UPGRADE_TARGET=head` in your environment.
