@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zufar – Portal</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Zufar</h1>
+      <span id="health" class="pill">בריאות: בודק…</span>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>הרשמת משתמש</h2>
+        <form id="register-form">
+          <label>אימייל
+            <input type="email" name="email" placeholder="you@example.com" required />
+          </label>
+          <label>שם מלא
+            <input type="text" name="full_name" placeholder="User Name" />
+          </label>
+          <label>סיסמה
+            <input type="password" name="password" minlength="6" required />
+          </label>
+          <button type="submit">הירשם</button>
+        </form>
+        <pre id="register-result" class="result"></pre>
+      </section>
+    </main>
+
+    <footer>
+      <small>© <span id="year"></span> Zufar</small>
+    </footer>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

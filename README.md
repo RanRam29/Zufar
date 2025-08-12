@@ -1,40 +1,27 @@
-# Event Console (IL) — FastAPI + Static SPA
 
-Features:
-- Map with current events (Leaflet + OSM)
-- Sign-up / Login (JWT)
-- Historical events page
-- WebSocket notifications ("push-like") for new confirmations
-- Israeli address geocoding via Nominatim
-- Edit events gated by required attendee threshold
-- Structured logging
+# Zufar Portal (React + Vite + Tailwind) – Vercel Ready
 
-## Run
+## Quickstart (Local)
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-export PORT=8000
-python -m uvicorn backend.app:app --host 0.0.0.0 --port $PORT --reload
+pnpm i   # or: npm i / yarn
+pnpm dev # or: npm run dev
 ```
+Environment:
+```
+VITE_API_BASE_URL=https://zufar.onrender.com
+```
+Visit http://localhost:5173
 
-## Env
-- DATABASE_URL (sqlite default: sqlite:///./app.db)
-- SECRET_KEY (change in production)
+## Deploy to Vercel
+- Import this repo in Vercel.
+- Framework preset: **Vite**.
+- Build Command: `npm run build`
+- Output Dir: `dist`
+- Environment Variable:
+  - `VITE_API_BASE_URL=https://zufar.onrender.com` (or your backend URL)
+- CORS: set `CORS_ORIGINS` in your backend to your Vercel domain.
 
 ## Notes
-- For real Web Push (VAPID), add a push service later; current impl uses WebSocket + Notification API.
-- For participants listing, add /events/{id}/participants endpoint as needed.
-
----
-## Alembic (DB migrations)
-Initialize & upgrade:
-```bash
-alembic upgrade head
-# Make changes to models, then:
-alembic revision --autogenerate -m "change"
-alembic upgrade head
-```
-
-## Security
-- Protected routes: `POST /events`, `PATCH /events/{id}` require Bearer JWT.
-- Public routes: signup/login, list/historical, confirm, participants.
+- Single-page app with static export.
+- Registration form posts to `/auth/register` on your backend.
+- Health badge calls `/healthz`.

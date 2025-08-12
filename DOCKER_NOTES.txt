@@ -1,0 +1,3 @@
+# Fragment to ensure static is copied in the image
+# Add this to your Dockerfile after copying requirements and before CMD
+# COPY static/ ./static/
