@@ -1,22 +1,21 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 import os
+from pathlib import Path
 
 from backend.database import on_startup_db_check
 from backend.routes import auth as auth_routes
-# debug route optional
-# from backend.routes import debug as debug_routes
 
 app = FastAPI()
 
-# CORS (allow SPA from separate host if needed)
+# --- CORS ---
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=origins or ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,27 +25,40 @@ app.add_middleware(
 def _startup():
     on_startup_db_check()
 
-# Static files & SPA index fallback
-STATIC_DIR = os.getenv("STATIC_DIR", "static")
-if os.path.isdir(STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# --- Static (SPA) ---
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+STATIC_DIR = Path(os.getenv("STATIC_DIR", PROJECT_ROOT / "static")).resolve()
 
+if STATIC_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
     @app.get("/", include_in_schema=False)
-    def root():
-        index_path = os.path.join(STATIC_DIR, "index.html")
-        if os.path.isfile(index_path):
+    async def root():
+        index_path = STATIC_DIR / "index.html"
+        if index_path.exists():
             return FileResponse(index_path)
-        return {"status": "up"}
+        return JSONResponse({"status": "up"}, 200)
+    @app.get("/favicon.svg", include_in_schema=False)
+    async def favicon():
+        fav = STATIC_DIR / "favicon.svg"
+        if fav.exists():
+            return FileResponse(fav)
+        return JSONResponse({"ok": True}, 200)
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        # Fallback all unknown routes to SPA index
+        index_path = STATIC_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+        return JSONResponse({"status": "up"}, 200)
 else:
     @app.get("/", include_in_schema=False)
     def root():
         return {"status": "up"}
 
-# health endpoint for Render
+# --- Health ---
 @app.get("/healthz", include_in_schema=False)
 def healthz():
     return {"status": "ok"}
 
-# API routers
+# --- API routers ---
 app.include_router(auth_routes.router)
-# app.include_router(debug_routes.router)

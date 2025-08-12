@@ -1,1 +1,26 @@
-__pycache__/\n.venv/\n*.pyc\n.DS_Store\n*.db\n
+# Python
+__pycache__/
+.venv/
+*.pyc
+*.pyo
+*.pyd
+
+# Databases & local files
+*.db
+.env
+.env.*
+.alembic/
+alembic/*.pyc
+
+# Node / Frontend
+node_modules/
+dist/
+.vercel/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+*.log
+coverage/
