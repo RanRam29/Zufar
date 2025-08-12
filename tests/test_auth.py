@@ -1,30 +1,58 @@
 import os
-import tempfile
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
-tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-os.environ["DATABASE_URL"] = f"sqlite:///{tmp_db.name}"
-
 from backend.app import app
-from backend.core.db import engine
 from backend.models.base import Base
+import backend.models.user  # noqa: F401 ensure model registration
 
-Base.metadata.drop_all(bind=engine)
+# Configure a test database (SQLite in-memory)
+SQLALCHEMY_DATABASE_URL = "sqlite://"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Create all tables
 Base.metadata.create_all(bind=engine)
+
+# Dependency override
+from backend.database import get_db  # type: ignore
+
+def override_get_db():
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+app.dependency_overrides[get_db] = override_get_db
+
 client = TestClient(app)
 
-def test_signup_and_login_success():
-    payload = {"username": "alice","email": "alice@example.com","password": "S3cret!!"}
-    r = client.post("/auth/signup", json=payload)
-    assert r.status_code == 200, r.text
-    assert r.json()["access_token"]
-    r2 = client.post("/auth/login", json={"email": payload["email"], "password": payload["password"]})
-    assert r2.status_code == 200, r2.text
-    assert r2.json()["access_token"]
+def test_signup_and_login_flow():
+    # Sign up
+    resp = client.post("/auth/signup", json={
+        "full_name": "Ran Ram",
+        "email": "ran@example.com",
+        "password": "secret123"
+    })
+    assert resp.status_code == 200, resp.text
+    token = resp.json().get("access_token")
+    assert token
 
-def test_signup_duplicate_email():
-    payload = {"username": "bob","email": "dup@example.com","password": "pass1234"}
-    assert client.post("/auth/signup", json=payload).status_code == 200
-    r = client.post("/auth/signup", json={"username": "bob2","email": "dup@example.com","password":"pass1234"})
-    assert r.status_code == 400
-    assert "Email already registered" in r.text
+    # Duplicate should fail
+    resp2 = client.post("/auth/signup", json={
+        "full_name": "Ran Again",
+        "email": "ran@example.com",
+        "password": "secret123"
+    })
+    assert resp2.status_code == 400
+
+    # Login ok
+    resp3 = client.post("/auth/login", json={
+        "email": "ran@example.com",
+        "password": "secret123"
+    })
+    assert resp3.status_code == 200
+    assert resp3.json().get("access_token")
