@@ -6,3 +6,4 @@ SQLAlchemy==2.0.32
 psycopg[binary]>=3.2.2,<3.3
 alembic==1.13.2
 email-validator>=2.1.0
+passlib[bcrypt]>=1.7.4
