@@ -26,3 +26,21 @@
 
 ## Notes
 - Requires: `sqlalchemy>=2.0`, `passlib[bcrypt]`, `fastapi`, `uvicorn`, `psycopg[binary]` (for Postgres).
+
+
+---
+## Multiple Alembic heads – quick fix & proper fix
+**Quick fix (already applied in `scripts/start.sh`):**
+- Run `alembic upgrade heads` so all branches apply and the app boots.
+
+**Proper fix (once, locally):**
+1. Inspect heads:
+   ```bash
+   alembic heads --verbose
+   ```
+2. Merge them into a single head (example with two heads `revA` and `revB`):
+   ```bash
+   alembic merge -m "merge heads" revA revB
+   ```
+   (If more than two, list them all).
+3. Commit the generated merge revision under `alembic/versions/` and redeploy.
