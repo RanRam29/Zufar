@@ -15,7 +15,7 @@ services:
         value: 3.11.9
     healthCheckPath: /healthz
 
-  - type: static
+  - type: web
     name: zufar-frontend
     env: static
     buildCommand: npm ci && npm run build
