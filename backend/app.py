@@ -27,6 +27,11 @@ def _startup():
 
 # --- Static (SPA) ---
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+STATIC_DIR = Path(os.getenv('STATIC_DIR', PROJECT_ROOT / 'static')).resolve()
+assets_path = STATIC_DIR / 'assets'
+os.makedirs(assets_path, exist_ok=True)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = Path(os.getenv("STATIC_DIR", PROJECT_ROOT / "static")).resolve()
 
 if STATIC_DIR.exists():
