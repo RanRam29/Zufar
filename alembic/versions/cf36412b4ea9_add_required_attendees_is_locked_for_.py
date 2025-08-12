@@ -30,7 +30,7 @@ def _has_column(bind, table: str, column: str) -> bool:
 def upgrade():
     bind = op.get_bind()
 
-    # ודא שהטבלה event קיימת (בלוקאל/SQLite ייתכן שהיא עדיין לא נוצרה בענף הזה)
+    # ensure event table exists (local/SQLite may not have it yet on this branch)
     if not _has_table(bind, "event"):
         op.create_table(
             "event",
@@ -41,19 +41,23 @@ def upgrade():
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("CURRENT_TIMESTAMP")),
         )
 
-    # הוסף required_attendees רק אם חסר
+    # add required_attendees iff missing
     if not _has_column(bind, "event", "required_attendees"):
         op.add_column(
             "event",
             sa.Column("required_attendees", sa.Integer(), nullable=False, server_default="1"),
         )
 
-    # הוסף is_locked_for_registration רק אם חסר
+    # add is_locked_for_registration iff missing (boolean default must be 'false' on Postgres)
     if not _has_column(bind, "event", "is_locked_for_registration"):
-        # ב-SQLite Boolean = INTEGER (0/1); ב-Postgres זה boolean – שניהם יעבדו
         op.add_column(
             "event",
-            sa.Column("is_locked_for_registration", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+            sa.Column(
+                "is_locked_for_registration",
+                sa.Boolean(),
+                nullable=False,
+                server_default=sa.text("false"),
+            ),
         )
 
 

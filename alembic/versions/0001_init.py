@@ -36,7 +36,6 @@ def upgrade():
 
     # --- EVENT ---
     if not _has_table(bind, "event"):
-        # שים לב: ב-SQLite Boolean הוא INT (0/1); ב-Postgres boolean אמיתי – שתי הסביבות יעבדו
         op.create_table(
             "event",
             sa.Column("id", sa.Integer, primary_key=True),
@@ -49,7 +48,7 @@ def upgrade():
             sa.Column("start_time", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("end_time", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
             sa.Column("required_attendees", sa.Integer, nullable=False, server_default="1"),
-            sa.Column("is_locked_for_edit", sa.Boolean, nullable=False, server_default=sa.text("0")),
+            sa.Column("is_locked_for_edit", sa.Boolean, nullable=False, server_default=sa.text("false")),
         )
 
     # --- PARTICIPANT ---
@@ -67,5 +66,5 @@ def upgrade():
 
 
 def downgrade():
-    # לא מבצעים DROP כדי להימנע מאובדן דאטה; אם חייבים, ניתן להוסיף בדיקות-קיום ולבצע drop.
+    # No destructive drops to avoid data loss.
     pass
