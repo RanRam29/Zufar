@@ -4,7 +4,6 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: ./scripts/start.sh
-    plan: free
     autoDeploy: true
     envVars:
       - key: LOG_LEVEL
@@ -15,12 +14,11 @@ services:
         value: 3.11.9
     healthCheckPath: /healthz
 
-  - type: web
+  - type: static
     name: zufar-frontend
     env: static
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
-    plan: free
     autoDeploy: true
     routes:
       - type: rewrite
