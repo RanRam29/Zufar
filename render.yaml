@@ -1,11 +1,28 @@
 services:
   - type: web
-    name: event-console-il
+    name: zufar-backend
     env: python
-    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m uvicorn backend.app:app --host 0.0.0.0 --port $PORT
+    startCommand: ./scripts/start.sh
+    plan: free
+    autoDeploy: true
     envVars:
       - key: LOG_LEVEL
         value: INFO
+      - key: ALEMBIC_UPGRADE_TARGET
+        value: head
+      - key: PYTHON_VERSION
+        value: 3.11.9
     healthCheckPath: /healthz
+
+  - type: static
+    name: zufar-frontend
+    env: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    plan: free
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: "/*"
+        destination: "/index.html"
