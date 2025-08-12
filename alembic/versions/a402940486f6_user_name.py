@@ -14,25 +14,10 @@ down_revision = "cf36412b4ea9"  # עדכן אם ה-head הקודם אצלך שו
 branch_labels = None
 depends_on = None
 
+def upgrade():
+    # no-op: superseded by 4f6d2a1b7ac9 (which also adds created_at)
+    pass
 
-def upgrade() -> None:
-    # 1) הוספת העמודה כ-nullable כדי לא לשבור שורות קיימות
-    op.add_column(
-        "user",
-        sa.Column("full_name", sa.String(length=256), nullable=True),
-    )
+def downgrade():
+    pass
 
-    # 2) אתחול ערכים לשורות קיימות (לוקחים את החלק לפני ה-@ באימייל)
-    op.execute('UPDATE "user" SET full_name = split_part(email, \'@\', 1) WHERE full_name IS NULL')
-
-    # 3) נעילת העמודה כ-not null (תואם למודל)
-    op.alter_column(
-        "user",
-        "full_name",
-        existing_type=sa.String(length=256),
-        nullable=False,
-    )
-
-
-def downgrade() -> None:
-    op.drop_column("user", "full_name")
