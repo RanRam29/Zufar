@@ -16,7 +16,7 @@ app = FastAPI()
 # הגדר במדויק את ה-Origins של הפרונט.
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
-    "https://zufar-frontend-t13k.onrender.com,http://localhost:3000"
+    "https://zufar-frontend-t13k.onrender.com,http://localhost:5173"
 )
 origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 
@@ -30,7 +30,14 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _startup():
+    # דיאגנוסטיקה: תראה בלוגים מה נקלט בפועל
+    print(f"[BOOT] CORS allow_origins = {origins}")
     on_startup_db_check()
+
+# --- API routers ---
+# חשוב: לרשום את ה-API לפני ה-catch-all של ה-SPA,
+# אחרת ה-{full_path:path} עלול לבלוע ראוטים.
+app.include_router(auth_routes.router)
 
 # --- Static (SPA) ---
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +78,3 @@ else:
 @app.get("/healthz", include_in_schema=False)
 def healthz():
     return {"status": "ok"}
-
-# --- API routers ---
-app.include_router(auth_routes.router)
