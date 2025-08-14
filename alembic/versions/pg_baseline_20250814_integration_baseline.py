@@ -1,13 +1,12 @@
-"""PostgreSQL Baseline Integration (single migration, idempotent, pluralized)
+"""PostgreSQL Baseline Integration (single migration, idempotent, plural + compat views)
 
-Consolidates schema into one safe migration.
-- Normalizes table names to plural: "user"->users, "event"->events
-- USERS: ensures email/full_name/hashed_password/created_at + UNIQUE(email)
-- EVENTS: ensures core columns; adds missing ones safely
-- PostgreSQL-only; uses NOW() and boolean defaults
+- Normalizes physical tables to plural: users, events.
+- Guarantees required columns on users; UC on users.email.
+- Provides compatibility views "user" and "event" with updatable RULES so code that uses
+  singular names continues to work transparently.
+- PostgreSQL only.
 
 """
-
 from alembic import op
 import sqlalchemy as sa
 
@@ -41,13 +40,13 @@ def _unique_names(table: str):
 def upgrade():
     assert _pg(), "This baseline is intended for PostgreSQL."
 
-    # ---------- Normalize table names to plural ----------
+    # ---------- Normalize physical table names to plural ----------
     if _has_table("user") and not _has_table("users"):
-        op.execute('ALTER TABLE "user" RENAME TO users')
+        op.execute('ALTER TABLE public."user" RENAME TO users')
     if _has_table("event") and not _has_table("events"):
-        op.execute("ALTER TABLE event RENAME TO events")
+        op.execute('ALTER TABLE public."event" RENAME TO events')
 
-    # ---------- USERS TABLE ----------
+    # ---------- USERS (physical table) ----------
     if not _has_table("users"):
         op.create_table(
             "users",
@@ -66,13 +65,12 @@ def upgrade():
         if "full_name" not in ucols:
             op.add_column("users", sa.Column("full_name", sa.String(length=255), nullable=True))
         if "hashed_password" not in ucols:
-            # add NOT NULL with temporary default to satisfy existing rows
             op.add_column("users", sa.Column("hashed_password", sa.String(length=255), nullable=False, server_default=sa.text("''")))
             op.alter_column("users", "hashed_password", server_default=None)
         if "created_at" not in ucols:
             op.add_column("users", sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")))
 
-        # Drop legacy single-table index name if it exists (harmless if missing)
+        # Drop legacy single-table index if exists
         op.execute("""
         DO $$ BEGIN
           IF EXISTS (
@@ -89,14 +87,13 @@ def upgrade():
         # Ensure unique(email)
         uqs = _unique_names("users")
         if "uq_users_email" not in uqs and "uq_user_email" not in uqs:
-            BEGIN_TRY = True  # noqa: F841 (just to hint try-block intent)
+            BEGIN_TRY = True  # noqa: F841
             try:
                 op.create_unique_constraint("uq_users_email", "users", ["email"])
             except Exception:
                 op.create_unique_constraint("uq_user_email", "users", ["email"])
 
-    # ---------- EVENTS TABLE ----------
-    # We support a richer schema (title/description/address/country_code/lat/lng/start_time/end_time/required_attendees/is_locked_for_edit/is_locked_for_registration/created_at).
+    # ---------- EVENTS (physical table) ----------
     if not _has_table("events"):
         op.create_table(
             "events",
@@ -133,6 +130,101 @@ def upgrade():
         _add_col_if_missing("is_locked_for_edit", sa.Column("is_locked_for_edit", sa.Boolean(), nullable=False, server_default=sa.text("false")))
         _add_col_if_missing("is_locked_for_registration", sa.Column("is_locked_for_registration", sa.Boolean(), nullable=False, server_default=sa.text("false")))
         _add_col_if_missing("created_at", sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")))
+
+    # ---------- Compatibility views (singular names) ----------
+    # Create VIEW "user" -> users (only if there is no conflicting TABLE named "user")
+    op.execute("""
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='user'
+      ) THEN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE c.relkind='v' AND c.relname='user'
+        ) THEN
+          EXECUTE 'CREATE VIEW public."user" AS SELECT id, email, full_name, hashed_password, created_at FROM public.users';
+        END IF;
+
+        -- Updatable rules to route writes to the base table
+        EXECUTE 'CREATE OR REPLACE RULE user_insert AS ON INSERT TO public."user"
+                 DO INSTEAD INSERT INTO public.users(email, full_name, hashed_password, created_at)
+                 VALUES (NEW.email, NEW.full_name, NEW.hashed_password, COALESCE(NEW.created_at, NOW()))
+                 RETURNING *';
+
+        EXECUTE 'CREATE OR REPLACE RULE user_update AS ON UPDATE TO public."user"
+                 DO INSTEAD UPDATE public.users
+                 SET email = NEW.email,
+                     full_name = NEW.full_name,
+                     hashed_password = NEW.hashed_password,
+                     created_at = COALESCE(NEW.created_at, users.created_at)
+                 WHERE users.id = OLD.id
+                 RETURNING *';
+
+        EXECUTE 'CREATE OR REPLACE RULE user_delete AS ON DELETE TO public."user"
+                 DO INSTEAD DELETE FROM public.users WHERE users.id = OLD.id RETURNING *';
+      END IF;
+    END $$;
+    """)
+
+    # Create VIEW event -> events
+    op.execute("""
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='event'
+      ) THEN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE c.relkind='v' AND c.relname='event'
+        ) THEN
+          EXECUTE 'CREATE VIEW public."event" AS
+                   SELECT id, title, description, address, country_code, lat, lng,
+                          start_time, end_time, required_attendees,
+                          is_locked_for_edit, is_locked_for_registration, created_at
+                   FROM public.events';
+        END IF;
+
+        EXECUTE 'CREATE OR REPLACE RULE event_insert AS ON INSERT TO public."event"
+                 DO INSTEAD INSERT INTO public.events
+                 (title, description, address, country_code, lat, lng, start_time, end_time,
+                  required_attendees, is_locked_for_edit, is_locked_for_registration, created_at)
+                 VALUES (COALESCE(NEW.title, ''''),
+                         COALESCE(NEW.description, ''''),
+                         COALESCE(NEW.address, ''''),
+                         COALESCE(NEW.country_code, ''''),
+                         COALESCE(NEW.lat, 0),
+                         COALESCE(NEW.lng, 0),
+                         COALESCE(NEW.start_time, NOW()),
+                         COALESCE(NEW.end_time, NOW()),
+                         COALESCE(NEW.required_attendees, 1),
+                         COALESCE(NEW.is_locked_for_edit, false),
+                         COALESCE(NEW.is_locked_for_registration, false),
+                         COALESCE(NEW.created_at, NOW()))
+                 RETURNING *';
+
+        EXECUTE 'CREATE OR REPLACE RULE event_update AS ON UPDATE TO public."event"
+                 DO INSTEAD UPDATE public.events
+                 SET title = COALESCE(NEW.title, events.title),
+                     description = COALESCE(NEW.description, events.description),
+                     address = COALESCE(NEW.address, events.address),
+                     country_code = COALESCE(NEW.country_code, events.country_code),
+                     lat = COALESCE(NEW.lat, events.lat),
+                     lng = COALESCE(NEW.lng, events.lng),
+                     start_time = COALESCE(NEW.start_time, events.start_time),
+                     end_time = COALESCE(NEW.end_time, events.end_time),
+                     required_attendees = COALESCE(NEW.required_attendees, events.required_attendees),
+                     is_locked_for_edit = COALESCE(NEW.is_locked_for_edit, events.is_locked_for_edit),
+                     is_locked_for_registration = COALESCE(NEW.is_locked_for_registration, events.is_locked_for_registration),
+                     created_at = COALESCE(NEW.created_at, events.created_at)
+                 WHERE events.id = OLD.id
+                 RETURNING *';
+
+        EXECUTE 'CREATE OR REPLACE RULE event_delete AS ON DELETE TO public."event"
+                 DO INSTEAD DELETE FROM public.events WHERE events.id = OLD.id RETURNING *';
+      END IF;
+    END $$;
+    """)
 
 
 def downgrade():
