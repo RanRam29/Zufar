@@ -50,13 +50,11 @@ config.set_main_option("sqlalchemy.url", db_url)
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=db_url,
-        target_metadata=target_metadata,
-        literal_binds=True,
-        dialect_opts={"paramstyle": "named"},
-        compare_type=True,
-        compare_server_default=True,
-    )
+    connection=connection,
+    target_metadata=target_metadata,
+    version_table="alembic_version",
+)
+
     with context.begin_transaction():
         context.run_migrations()
 
