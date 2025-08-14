@@ -1,12 +1,10 @@
-"""PostgreSQL Baseline Integration (single migration, idempotent)
+"""PostgreSQL Baseline Integration (single migration, idempotent, pluralized)
 
-This migration consolidates schema into one file and is safe to run on an
-existing PostgreSQL database. It creates/aligns the `user` and `event` tables
-and enforces unique email. It will not error if objects already exist.
-
-Notes:
-- Designed for PostgreSQL. Uses NOW() and boolean defaults (true/false).
-- Idempotent: checks existence before create/alter.
+Consolidates schema into one safe migration.
+- Normalizes table names to plural: "user"->users, "event"->events
+- USERS: ensures email/full_name/hashed_password/created_at + UNIQUE(email)
+- EVENTS: ensures core columns; adds missing ones safely
+- PostgreSQL-only; uses NOW() and boolean defaults
 
 """
 
@@ -43,30 +41,38 @@ def _unique_names(table: str):
 def upgrade():
     assert _pg(), "This baseline is intended for PostgreSQL."
 
-    # ---------------- USER TABLE ----------------
-    if not _has_table("user"):
+    # ---------- Normalize table names to plural ----------
+    if _has_table("user") and not _has_table("users"):
+        op.execute('ALTER TABLE "user" RENAME TO users')
+    if _has_table("event") and not _has_table("events"):
+        op.execute("ALTER TABLE event RENAME TO events")
+
+    # ---------- USERS TABLE ----------
+    if not _has_table("users"):
         op.create_table(
-            "user",
+            "users",
             sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
             sa.Column("email", sa.String(length=255), nullable=False),
             sa.Column("full_name", sa.String(length=255), nullable=True),
             sa.Column("hashed_password", sa.String(length=255), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()"), nullable=False),
         )
-        op.create_unique_constraint("uq_users_email", "user", ["email"])
+        op.create_unique_constraint("uq_users_email", "users", ["email"])
     else:
-        cols = _col_names("user")
+        ucols = _col_names("users")
 
-        if "email" not in cols:
-            op.add_column("user", sa.Column("email", sa.String(length=255), nullable=False))
-        if "full_name" not in cols:
-            op.add_column("user", sa.Column("full_name", sa.String(length=255), nullable=True))
-        if "hashed_password" not in cols:
-            op.add_column("user", sa.Column("hashed_password", sa.String(length=255), nullable=False))
-        if "created_at" not in cols:
-            op.add_column("user", sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()"), nullable=False))
+        if "email" not in ucols:
+            op.add_column("users", sa.Column("email", sa.String(length=255), nullable=False))
+        if "full_name" not in ucols:
+            op.add_column("users", sa.Column("full_name", sa.String(length=255), nullable=True))
+        if "hashed_password" not in ucols:
+            # add NOT NULL with temporary default to satisfy existing rows
+            op.add_column("users", sa.Column("hashed_password", sa.String(length=255), nullable=False, server_default=sa.text("''")))
+            op.alter_column("users", "hashed_password", server_default=None)
+        if "created_at" not in ucols:
+            op.add_column("users", sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")))
 
-        # Drop legacy index if present
+        # Drop legacy single-table index name if it exists (harmless if missing)
         op.execute("""
         DO $$ BEGIN
           IF EXISTS (
@@ -81,40 +87,52 @@ def upgrade():
         """)
 
         # Ensure unique(email)
-        uqs = _unique_names("user")
+        uqs = _unique_names("users")
         if "uq_users_email" not in uqs and "uq_user_email" not in uqs:
-            BEGIN_TRY = True
+            BEGIN_TRY = True  # noqa: F841 (just to hint try-block intent)
             try:
-                op.create_unique_constraint("uq_users_email", "user", ["email"])
+                op.create_unique_constraint("uq_users_email", "users", ["email"])
             except Exception:
-                op.create_unique_constraint("uq_user_email", "user", ["email"])
+                op.create_unique_constraint("uq_user_email", "users", ["email"])
 
-    # ---------------- EVENT TABLE ----------------
-    if not _has_table("event"):
+    # ---------- EVENTS TABLE ----------
+    # We support a richer schema (title/description/address/country_code/lat/lng/start_time/end_time/required_attendees/is_locked_for_edit/is_locked_for_registration/created_at).
+    if not _has_table("events"):
         op.create_table(
-            "event",
+            "events",
             sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
             sa.Column("title", sa.String(length=255), nullable=False, server_default=sa.text("''")),
-            sa.Column("date", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("address", sa.String(length=255), nullable=True),
+            sa.Column("description", sa.String(length=255), nullable=False, server_default=sa.text("''")),
+            sa.Column("address", sa.String(length=255), nullable=False, server_default=sa.text("''")),
+            sa.Column("country_code", sa.String(length=8), nullable=False, server_default=sa.text("''")),
+            sa.Column("lat", sa.Float(), nullable=False, server_default=sa.text("0")),
+            sa.Column("lng", sa.Float(), nullable=False, server_default=sa.text("0")),
+            sa.Column("start_time", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
+            sa.Column("end_time", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
             sa.Column("required_attendees", sa.Integer(), nullable=False, server_default=sa.text("1")),
+            sa.Column("is_locked_for_edit", sa.Boolean(), nullable=False, server_default=sa.text("false")),
             sa.Column("is_locked_for_registration", sa.Boolean(), nullable=False, server_default=sa.text("false")),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()"), nullable=False),
         )
     else:
-        ecols = _col_names("event")
-        if "title" not in ecols:
-            op.add_column("event", sa.Column("title", sa.String(length=255), nullable=False, server_default=sa.text("''")))
-        if "date" not in ecols:
-            op.add_column("event", sa.Column("date", sa.DateTime(timezone=True), nullable=True))
-        if "address" not in ecols:
-            op.add_column("event", sa.Column("address", sa.String(length=255), nullable=True))
-        if "required_attendees" not in ecols:
-            op.add_column("event", sa.Column("required_attendees", sa.Integer(), nullable=False, server_default=sa.text("1")))
-        if "is_locked_for_registration" not in ecols:
-            op.add_column("event", sa.Column("is_locked_for_registration", sa.Boolean(), nullable=False, server_default=sa.text("false")))
-        if "created_at" not in ecols:
-            op.add_column("event", sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("NOW()"), nullable=False))
+        ecols = _col_names("events")
+
+        def _add_col_if_missing(name, col):
+            if name not in ecols:
+                op.add_column("events", col)
+
+        _add_col_if_missing("title", sa.Column("title", sa.String(length=255), nullable=False, server_default=sa.text("''")))
+        _add_col_if_missing("description", sa.Column("description", sa.String(length=255), nullable=False, server_default=sa.text("''")))
+        _add_col_if_missing("address", sa.Column("address", sa.String(length=255), nullable=False, server_default=sa.text("''")))
+        _add_col_if_missing("country_code", sa.Column("country_code", sa.String(length=8), nullable=False, server_default=sa.text("''")))
+        _add_col_if_missing("lat", sa.Column("lat", sa.Float(), nullable=False, server_default=sa.text("0")))
+        _add_col_if_missing("lng", sa.Column("lng", sa.Float(), nullable=False, server_default=sa.text("0")))
+        _add_col_if_missing("start_time", sa.Column("start_time", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")))
+        _add_col_if_missing("end_time", sa.Column("end_time", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")))
+        _add_col_if_missing("required_attendees", sa.Column("required_attendees", sa.Integer(), nullable=False, server_default=sa.text("1")))
+        _add_col_if_missing("is_locked_for_edit", sa.Column("is_locked_for_edit", sa.Boolean(), nullable=False, server_default=sa.text("false")))
+        _add_col_if_missing("is_locked_for_registration", sa.Column("is_locked_for_registration", sa.Boolean(), nullable=False, server_default=sa.text("false")))
+        _add_col_if_missing("created_at", sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")))
 
 
 def downgrade():
