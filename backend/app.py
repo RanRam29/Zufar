@@ -12,8 +12,6 @@ from backend.routes import auth as auth_routes
 app = FastAPI()
 
 # --- CORS ---
-# חשוב: אל תשתמש ב-* יחד עם allow_credentials=True.
-# הגדר במדויק את ה-Origins של הפרונט.
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
     "https://zufar-frontend-t13k.onrender.com,http://localhost:5173"
@@ -22,7 +20,7 @@ origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,            # חייב להיות ספציפי
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -30,13 +28,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _startup():
-    # דיאגנוסטיקה: תראה בלוגים מה נקלט בפועל
     print(f"[BOOT] CORS allow_origins = {origins}")
     on_startup_db_check()
 
 # --- API routers ---
-# חשוב: לרשום את ה-API לפני ה-catch-all של ה-SPA,
-# אחרת ה-{full_path:path} עלול לבלוע ראוטים.
 app.include_router(auth_routes.router)
 
 # --- Static (SPA) ---
@@ -64,7 +59,6 @@ if STATIC_DIR.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa_fallback(full_path: str):
-        # Fallback כל ראוט לא מוכר לקובץ ה-SPA
         index_path = STATIC_DIR / "index.html"
         if index_path.exists():
             return FileResponse(index_path)

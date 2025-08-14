@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends, Response
-from pydantic import BaseModel, EmailStr
-from pydantic import StringConstraints
+# backend/routes/auth.py
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, EmailStr, StringConstraints
 from typing import Annotated, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, ProgrammingError
@@ -12,7 +12,6 @@ import logging
 router = APIRouter(prefix="/auth", tags=["auth"])
 log = logging.getLogger(__name__)
 
-# Pydantic v2 style: Annotated[str, StringConstraints(...)]
 Min1Str = Annotated[str, StringConstraints(min_length=1)]
 Min6Str = Annotated[str, StringConstraints(min_length=6)]
 
@@ -29,7 +28,6 @@ class RegisterOut(BaseModel):
 @router.post("/register", response_model=RegisterOut)
 def register_user(payload: RegisterIn, db: Session = Depends(get_db)):
     try:
-        # אימות כפילות דוא"ל
         exists = db.query(User).filter(User.email == payload.email).first()
         if exists:
             raise HTTPException(status_code=400, detail="Email already registered")
@@ -49,12 +47,10 @@ def register_user(payload: RegisterIn, db: Session = Depends(get_db)):
     except IntegrityError:
         db.rollback()
         log.exception("IntegrityError on register")
-        # למשל הפרת UNIQUE(email)
         raise HTTPException(status_code=400, detail="Email already registered")
     except ProgrammingError:
         db.rollback()
         log.exception("ProgrammingError on register (table/column mismatch?)")
-        # רמז מפורש לפער במבנה DB
         raise HTTPException(
             status_code=500,
             detail="Database schema mismatch. Run migrations and align table names.",

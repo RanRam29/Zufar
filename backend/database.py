@@ -1,3 +1,4 @@
+# backend/database.py
 import os
 import logging
 from typing import Generator, Optional
@@ -6,6 +7,9 @@ from sqlalchemy.orm import sessionmaker, Session
 
 logger = logging.getLogger("app.db")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+
+RUNNING_IN_RENDER = bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"))
+REQUIRE_DATABASE_URL = os.getenv("REQUIRE_DATABASE_URL", "1") == "1"
 
 def _normalize_url(url: str) -> str:
     if url.startswith("postgres://"):
@@ -21,14 +25,21 @@ if RAW_URL:
     DATABASE_URL = _normalize_url(RAW_URL)
     ACTIVE_DB = "EXTERNAL_POSTGRES"
 else:
+    if RUNNING_IN_RENDER and REQUIRE_DATABASE_URL:
+        raise RuntimeError("DATABASE_URL missing in production; refusing SQLite fallback.")
     DATABASE_URL = "sqlite:///./dev.db"
     ACTIVE_DB = "SQLITE_FALLBACK"
+
+connect_args = {}
+if DATABASE_URL.startswith("sqlite:///"):
+    connect_args = {"check_same_thread": False}
 
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
     future=True,
     echo=os.getenv("SQL_ECHO", "0") == "1",
+    connect_args=connect_args,
 )
 
 SessionLocal = sessionmaker(
@@ -53,10 +64,16 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 def on_startup_db_check() -> None:
-    logger.warning("DB INIT | mode=%s | url=%s", ACTIVE_DB, _redact(DATABASE_URL))
+    try:
+        dialect = engine.dialect.name
+    except Exception:
+        dialect = "unknown"
+    logger.warning("DB INIT | mode=%s | dialect=%s | url=%s", ACTIVE_DB, dialect, _redact(DATABASE_URL))
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         logger.info("DB connectivity OK")
     except Exception as e:
         logger.exception("DB connectivity FAILED: %s", e)
+        if RUNNING_IN_RENDER and REQUIRE_DATABASE_URL:
+            raise
