@@ -1,26 +1,29 @@
 # Python
 __pycache__/
-.venv/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
+*.so
 
-# Databases & local files
-*.db
-.env
-.env.*
-.alembic/
-alembic/*.pyc
+# Virtual env
+.venv/
+env/
+venv/
 
-# Node / Frontend
-node_modules/
-dist/
-.vercel/
-
-# OS
+# Editors/OS
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
 
-# Build outputs
+# Local DB
+dev.db
+*.sqlite3
+
+# Logs & env
 *.log
-coverage/
+.env
+
+# Alembic caches
+alembic/__pycache__/
+backend/**/__pycache__/
