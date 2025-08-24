@@ -1,61 +1,58 @@
 # backend/routes/auth.py
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr, StringConstraints
-from typing import Annotated, Optional
+from __future__ import annotations
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError, ProgrammingError
+
 from backend.database import get_db
-from backend.users.models import User
-from passlib.hash import bcrypt
-import logging
+from backend.users.models import User  # Uses column "hashed_password"
+from backend.security_simple import hash_password, verify_password, create_access_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-log = logging.getLogger(__name__)
 
-Min1Str = Annotated[str, StringConstraints(min_length=1)]
-Min6Str = Annotated[str, StringConstraints(min_length=6)]
-
-class RegisterIn(BaseModel):
+class SignUp(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=256)
     email: EmailStr
-    full_name: Optional[Min1Str] = None
-    password: Min6Str
+    password: str = Field(..., min_length=6, max_length=256)
 
-class RegisterOut(BaseModel):
-    id: int
+class Login(BaseModel):
     email: EmailStr
-    full_name: Optional[str]
+    password: str = Field(..., min_length=6, max_length=256)
 
-@router.post("/register", response_model=RegisterOut)
-def register_user(payload: RegisterIn, db: Session = Depends(get_db)):
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+@router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
+def register(payload: SignUp, db: Session = Depends(get_db)) -> Token:
+    # Normalize email to lower
+    email = payload.email.lower().strip()
+    # Unique email enforced by DB (users.models.User has UniqueConstraint on email)
+    user = User(email=email, full_name=payload.full_name, hashed_password=hash_password(payload.password))
     try:
-        exists = db.query(User).filter(User.email == payload.email).first()
-        if exists:
-            raise HTTPException(status_code=400, detail="Email already registered")
-
-        user = User(
-            email=payload.email,
-            full_name=payload.full_name,
-            hashed_password=bcrypt.hash(payload.password),
-        )
         db.add(user)
         db.commit()
         db.refresh(user)
-        return RegisterOut(id=user.id, email=user.email, full_name=user.full_name)
-
-    except HTTPException:
-        raise
     except IntegrityError:
         db.rollback()
-        log.exception("IntegrityError on register")
         raise HTTPException(status_code=400, detail="Email already registered")
-    except ProgrammingError:
+    except ProgrammingError as e:
         db.rollback()
-        log.exception("ProgrammingError on register (table/column mismatch?)")
-        raise HTTPException(
-            status_code=500,
-            detail="Database schema mismatch. Run migrations and align table names.",
-        )
-    except Exception:
+        # Likely table/column mismatch – surface a pragmatic message
+        raise HTTPException(status_code=500, detail=f"Database schema mismatch: {str(e)}")
+    except Exception as e:
         db.rollback()
-        log.exception("Unexpected error on register")
         raise HTTPException(status_code=500, detail="Registration failed")
+    token = create_access_token(str(user.id))
+    return Token(access_token=token)
+
+@router.post("/login", response_model=Token)
+def login(payload: Login, db: Session = Depends(get_db)) -> Token:
+    email = payload.email.lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not verify_password(payload.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    token = create_access_token(str(user.id))
+    return Token(access_token=token)

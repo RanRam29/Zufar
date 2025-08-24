@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from backend.database import on_startup_db_check
 from backend.routes import auth as auth_routes
+from backend.routers import events as events_router
 
 app = FastAPI()
 
@@ -33,6 +34,7 @@ def _startup():
 
 # --- API routers ---
 app.include_router(auth_routes.router)
+app.include_router(events_router.router)
 
 # --- Static (SPA) ---
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
