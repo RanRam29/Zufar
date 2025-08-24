@@ -1,13 +1,11 @@
-from __future__ import annotations
+from typing import Optional
 from datetime import datetime
-from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Integer, String, DateTime, func
-from .base import Base
+from sqlmodel import SQLModel, Field
 
-class User(Base):
-    __tablename__ = "user"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(String(256), unique=True, index=True, nullable=False)
-    full_name: Mapped[str] = mapped_column(String(256), nullable=False)
-    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: Optional[str] = Field(default=None, index=True, unique=True)
+    email: str = Field(index=True, unique=True)
+    full_name: Optional[str] = None
+    hashed_password: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -1,76 +1,35 @@
-# backend/app.py
 import os
-from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from sqlmodel import SQLModel
+from .db import engine
+from .routes.auth import router as auth_router
 
-from backend.database import on_startup_db_check
-from backend.routes import auth as auth_routes
-from backend.routers import events as events_router
+app = FastAPI(title="Zufar API")
+app.router.redirect_slashes = False
 
-app = FastAPI()
-
-# --- CORS ---
-CORS_ORIGINS = os.getenv(
-    "CORS_ORIGINS",
-    "https://zufar-frontend-t13k.onrender.com,http://localhost:5173"
-)
-origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
+ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://zufar-frontend-t13k.onrender.com",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
+    max_age=86400,
 )
 
-@app.on_event("startup")
-def _startup():
-    print(f"[BOOT] CORS allow_origins = {origins}")
-    on_startup_db_check()
-
-# --- API routers ---
-app.include_router(auth_routes.router)
-app.include_router(events_router.router)
-
-# --- Static (SPA) ---
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-STATIC_DIR = Path(os.getenv("STATIC_DIR", PROJECT_ROOT / "static")).resolve()
-assets_path = STATIC_DIR / "assets"
-os.makedirs(assets_path, exist_ok=True)
-
-if STATIC_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
-
-    @app.get("/", include_in_schema=False)
-    async def root():
-        index_path = STATIC_DIR / "index.html"
-        if index_path.exists():
-            return FileResponse(index_path)
-        return JSONResponse({"status": "up"}, 200)
-
-    @app.get("/favicon.svg", include_in_schema=False)
-    async def favicon():
-        fav = STATIC_DIR / "favicon.svg"
-        if fav.exists():
-            return FileResponse(fav)
-        return JSONResponse({"ok": True}, 200)
-
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def spa_fallback(full_path: str):
-        index_path = STATIC_DIR / "index.html"
-        if index_path.exists():
-            return FileResponse(index_path)
-        return JSONResponse({"status": "up"}, 200)
-else:
-    @app.get("/", include_in_schema=False)
-    def root_only_api():
-        return {"status": "up"}
-
-# --- Health ---
-@app.get("/healthz", include_in_schema=False)
+@app.get("/healthz")
 def healthz():
-    return {"status": "ok"}
+    return {"ok": True}
+
+@app.on_event("startup")
+async def on_startup():
+    if (os.getenv("AUTO_CREATE_TABLES", "1") == "1") and            (os.getenv("DATABASE_URL", "sqlite:///dev.db").startswith("sqlite")):
+        SQLModel.metadata.create_all(engine)
+
+app.include_router(auth_router)
