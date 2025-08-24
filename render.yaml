@@ -1,29 +1,23 @@
 services:
   - type: web
-    name: zufar-backend
+    name: zufar-backend-t13k
     env: python
-    buildCommand: pip install -r backend/requirements.txt
+    region: oregon
+    buildCommand: pip install -r requirements.txt
     startCommand: ./scripts/start.sh
-    autoDeploy: true
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
-      - key: LOG_LEVEL
-        value: INFO
-      - key: ALEMBIC_UPGRADE_TARGET
-        value: head
     healthCheckPath: /healthz
-
-  - type: web
-    name: zufar-frontend
-    env: static
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
-    autoDeploy: true
     envVars:
-      - key: NODE_VERSION
-        value: 20
-    routes:
-      - type: rewrite
-        source: "/*"
-        destination: "/index.html"
+      - key: DATABASE_URL
+        fromSecret: DATABASE_URL
+      - key: REQUIRE_DATABASE_URL
+        value: "1"
+      - key: CORS_ALLOW_ORIGINS
+        value: '["https://zufar-frontend-t13k.onrender.com"]'
+
+  - type: static_site
+    name: zufar-frontend-t13k
+    buildCommand: npm ci && npm run build
+    publishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://zufar-backend-t13k.onrender.com
