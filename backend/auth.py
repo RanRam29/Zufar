@@ -40,33 +40,25 @@ def create_access_token(subject: Union[int, str], minutes: Optional[int] = None)
     return token
 
 def _select_user_by_username(session: Session, username: str) -> Optional[User]:
-    return session.exec(select(User).where(User.username == username)).first()
+    try:
+        return session.exec(select(User).where(User.username == username)).first()  # type: ignore[attr-defined]
+    except Exception:
+        return None
 
 def _select_user_by_email(session: Session, email: str) -> Optional[User]:
     return session.exec(select(User).where(User.email == email)).first()
 
 def register_user(session: Session, payload: UserCreate) -> User:
     email = (payload.email or "").strip().lower()
-    username_from_payload = getattr(payload, "username", None)
-    username = (username_from_payload or (email.split("@")[0] if email else None))
 
-    if hasattr(User, "username") and username:
-        if _select_user_by_username(session, username):
-            raise HTTPException(status_code=400, detail="username already exists")
+    if _select_user_by_email(session, email):
+        raise HTTPException(status_code=400, detail="email already exists")
 
-    if hasattr(User, "email") and email:
-        if _select_user_by_email(session, email):
-            raise HTTPException(status_code=400, detail="email already exists")
-
-    user_kwargs = {}
-    if hasattr(User, "username") and username:
-        user_kwargs["username"] = username
-    if hasattr(User, "email") and email:
-        user_kwargs["email"] = email
-    if hasattr(User, "full_name") and hasattr(payload, "full_name"):
-        user_kwargs["full_name"] = getattr(payload, "full_name")
-
-    user_kwargs["hashed_password"] = hash_password(payload.password)
+    user_kwargs = {
+        "email": email,
+        "full_name": getattr(payload, "full_name", None),
+        "hashed_password": hash_password(payload.password),
+    }
 
     try:
         user = User(**user_kwargs)  # type: ignore[arg-type]
@@ -80,11 +72,9 @@ def register_user(session: Session, payload: UserCreate) -> User:
         raise HTTPException(status_code=500, detail="Registration failed")
 
 def authenticate_user(session: Session, identifier: str, password: str) -> Optional[User]:
-    candidate: Optional[User] = None
-    if hasattr(User, "username"):
+    candidate: Optional[User] = _select_user_by_email(session, identifier.lower()) or None
+    if not candidate:
         candidate = _select_user_by_username(session, identifier)
-    if not candidate and hasattr(User, "email"):
-        candidate = _select_user_by_email(session, identifier.lower())
 
     if not candidate:
         return None

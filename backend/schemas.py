@@ -1,11 +1,10 @@
 from typing import Optional
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
     full_name: Optional[str] = None
-    username: Optional[str] = None
+    password: str = Field(min_length=6)
 
 class LoginJSON(BaseModel):
     identifier: str
@@ -14,3 +13,8 @@ class LoginJSON(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+class UserRead(BaseModel):
+    id: int
+    email: EmailStr
+    full_name: Optional[str] = None
